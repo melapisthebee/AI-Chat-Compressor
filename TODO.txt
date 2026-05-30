@@ -1,0 +1,34 @@
+TODO: Migrating knowledge_core table schema to use native SQLAlchemy JSON types
+---------------------------------------------------------------------------------
+[ ] Update database/models.py: Change content column type from Text to JSON.
+    -> Code: content = Column(JSON)
+[ ] Handle schema application (Choose one):
+    - Option 1: Drop existing local SQLite file to let tables recreate cleanly on next run.
+    - Option 2: Setup Alembic migration if project history needs preservation.
+[ ] Remove manual json.dumps() dictionary serialization from engine/compression.py once ORM handling is native.
+
+TODO: Migrate state merging logic from LLM prompt to native Python code
+-----------------------------------------------------------------------------
+[ ] Refactor engine/compression.py to have the LLM return ONLY fresh updates or newly extracted facts instead of the entire mutated JSON tree.
+[ ] Implement a native Python deep-merge utility (e.g., recursive dict update) to stitch current database records together with the incoming LLM payload.
+[ ] Streamline the system prompt in engine/compression.py by removing macro inheritance mandates, cutting prompt token overhead and completely eliminating the risk of small-model sub-key pruning.
+
+TODO: Optimize Context Ingestion, Token Density, and Multi-Type Parsing Handlers
+---------------------------------------------------------------------------------
+[ ] Implement Tool Output / Data Listing Truncation Layer in engine/parser.py:
+    - Add regex/logic checks to detect automated XML tags (<tool_call>, <tool_response>) or deep text blocks dominated by file list patterns.
+    - Truncate data dumps crossing a specific line threshold (e.g., max_lines = 15) to a tiny head/tail summary, isolating the model from token noise.
+[ ] Refactor engine/parser.py into Independent Extension Parsing Pipelines:
+    - JSON Parser: Native structural load via dictionary mapping (Completed).
+    - MD Parser: Specialized check for markdown headers and code fence block skips.
+    - TXT Parser: Lightweight, lightning-fast regex splitting without code fence tracking overhead.
+    - PDF Parser: Sanitize line fragmentation caused by page extraction coordinates before token split validation.
+
+TODO: Robustness, Memory Safety & Parsing Recovery Trackers
+---------------------------------------------------------------------------------
+[ ] Integrate Robust Delimiter-Based Parsing / Schema-Guided Recovery Layer:
+    - Upgrade the JSON repair logic in engine/compression.py to utilize a robust parser strategy (e.g., a utility like robust-json).
+    - Ensure extraction can safely ignore loose model comments, handle trailing object commas, and recover usable schemas from partially truncated strings.
+[ ] Implement Multi-Threaded Thread Safety & QThread Lifecycle Protections:
+    - Audit background workflow lifecycles inside gui/main_window.py.
+    - Standardize thread shutdown routes to explicitly enforce the Quit-Wait execution pattern (worker.quit() followed by worker.wait()) to eliminate testing/production resource leaks.

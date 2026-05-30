@@ -1,0 +1,15 @@
+# Virtual Environment
+.venv/
+__pycache__/
+*.pyc
+
+# Database and Storage local files
+storage/archive.db
+*.json
+
+# IDE config files
+.vscode/
+.idea/
+
+# Protected files
+.env
