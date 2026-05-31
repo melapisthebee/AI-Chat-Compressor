@@ -109,8 +109,7 @@ class CompressionEngine:
                 return current_knowledge
 
         except Exception as e:
-            print(f"Extraction pipeline bypass encountered: {e}")
-            return current_knowledge
+            raise RuntimeError(f"LM Studio API Connection Failure: {str(e)}")
 
     def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str) -> Dict[str, Any]:
         """
