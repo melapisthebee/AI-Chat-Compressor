@@ -1,10 +1,44 @@
 import re
+import time
+import sqlite3
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from functools import wraps
+from typing import Dict, List, Optional, Any, Callable
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from database.models import Project, Session as ChatSession, KnowledgeCore
 from database.connection import db_write_lock
 
+def retry_on_locked(max_retries: int = 3, base_delay: float = 0.5):
+    """
+    Decorator to retry database operations with exponential backoff
+    when encountering 'database is locked' errors.
+    
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
+        base_delay: Initial delay in seconds before first retry (default: 0.5s)
+    """
+    def decorator(func: Callable):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except OperationalError as e:
+                    error_msg = str(e).lower()
+                    if 'database is locked' in error_msg and attempt < max_retries:
+                        last_exception = e
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff
+                        print(f"⚠️ Database locked, retrying in {delay:.1f}s... (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(delay)
+                    else:
+                        raise
+            raise last_exception
+        return wrapper
+    return decorator
+
+@retry_on_locked(max_retries=3, base_delay=0.5)
 def get_or_create_project(db: Session, project_name: str) -> Project:
     """
     Fetches a project by name, or creates it if it doesn't exist yet.
@@ -33,6 +67,7 @@ def get_project_knowledge(db: Session, project_id: int) -> Dict[str, Any]:
     entries = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
     return {entry.category: entry.content for entry in entries}
 
+@retry_on_locked(max_retries=3, base_delay=0.5)
 def create_session_record(
     db: Session, 
     project_id: int, 
@@ -56,6 +91,7 @@ def create_session_record(
         db.refresh(session_record)
         return session_record
 
+@retry_on_locked(max_retries=3, base_delay=1.0)
 def update_adaptive_knowledge(
     db: Session, 
     project_id: int, 

@@ -1,8 +1,3 @@
- 2.
- Add SQLite timeout parameter to connection string:
-python
-connect_args={"check_same_thread": False, "timeout": 30}
- Implement database operation mutex for concurrent GUI write access
  Add retry logic with exponential backoff for database is locked errors
  Test multi-threaded scenarios to verify no race conditions
 
