@@ -60,8 +60,8 @@ It's quick because it's easy.
 
 
 
-&#x09;Verify with `python -m pip --version` : 
-	Should output something like `pip 26.1.1 from C:\\\\Python314\\\\Lib\\\\site-packages\\\\pip (python 3.14)`
+&#x09;Verify with `python -m pip --version` :
+Should output something like `pip 26.1.1 from C:\\\\\\\\Python314\\\\\\\\Lib\\\\\\\\site-packages\\\\\\\\pip (python 3.14)`
 
 
 
@@ -91,37 +91,9 @@ It's quick because it's easy.
 
 
 
-4:
+4: Fill the `.env` with your LM Studio URL, API Token, and Model of choice. 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-4: Fill the .env (Environment file) with your URL endpoint, API Token, and model of choice.
-
-If you are missing the file, you should create it ".env" in the project root.
-
-This is the same directory as the README.md.
-
-The .env should look something like this:
-
-
-
-LM\_STUDIO\_BASE\_URL="http://192.0.0.0:1234/v1"
-
-LM\_STUDIO\_API\_KEY="{depends on provider}"
-
-DEFAULT\_COMPRESSION\_MODEL="qwopus3.5-9b-coder-mtp"
 
 
 
