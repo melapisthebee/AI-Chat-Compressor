@@ -182,6 +182,10 @@ class MainWindow(QMainWindow):
         self.worker.progress_signal.connect(self.update_status)
         self.worker.error_signal.connect(self.handle_worker_error)
         self.worker.finished_signal.connect(self.handle_worker_success)
+        
+        # MEMORY LEAK PREVENTION: Force C++ QThread object cleanup natively upon completion
+        self.worker.finished.connect(self.worker.deleteLater)
+        
         self.worker.start()
 
     def update_status(self, text: str):
@@ -220,3 +224,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Context state copied to clipboard!", 3000)
         else:
             QMessageBox.warning(self, "Copy Failed", "The output area is currently empty.")
+
+    def closeEvent(self, event):
+        """
+        Safely captures application shutdown attempts and forces the background worker 
+        through the explicit Quit-Wait lifecycle execution pattern to prevent 
+        'Destroyed while thread is still running' underlying C++ exceptions.
+        """
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.console_output.append("\n⚠️ System shutting down: Halting background background generation loop...")
+            self.worker.quit()
+            self.worker.wait()
+        event.accept()
