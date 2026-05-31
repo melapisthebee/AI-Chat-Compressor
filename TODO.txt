@@ -1,15 +1,6 @@
-TODO: Migrating knowledge_core table schema to use native SQLAlchemy JSON types
----------------------------------------------------------------------------------
-[X] Update database/models.py: Change content column type from Text to JSON.
-    -> Code: content = Column(JSON)
-[X] Handle schema application (Choose one):
-    - Option 1: Drop existing local SQLite file to let tables recreate cleanly on next run.
-    - Option 2: Setup Alembic migration if project history needs preservation.
-[X] Remove manual json.dumps() dictionary serialization from engine/compression.py once ORM handling is native.
-
 TODO: Migrate state merging logic from LLM prompt to native Python code
 -----------------------------------------------------------------------------
-[ ] Refactor engine/compression.py to have the LLM return ONLY fresh updates or newly extracted facts instead of the entire mutated JSON tree.
+[X] Refactor engine/compression.py to have the LLM return ONLY fresh updates or newly extracted facts instead of the entire mutated JSON tree.
 [ ] Implement a native Python deep-merge utility (e.g., recursive dict update) to stitch current database records together with the incoming LLM payload.
 [ ] Streamline the system prompt in engine/compression.py by removing macro inheritance mandates, cutting prompt token overhead and completely eliminating the risk of small-model sub-key pruning.
 [ ] Add validation/soft-delete safety check to database/queries.py (`update_adaptive_knowledge`) to ensure a category key isn't dropped if the incoming text block simply didn't touch on that domain or if the model response was truncated.

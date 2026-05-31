@@ -10,6 +10,10 @@ from database.queries import get_project_knowledge, create_session_record, updat
 
 class CompressionEngine:
     def __init__(self):
+        """
+        Initializes the compression engine client utilizing configured environment parameters
+        loaded via Pydantic Settings. Assumes a running local instance of LM Studio.
+        """
         self.client = OpenAI(
             base_url=settings.LM_STUDIO_BASE_URL,
             api_key=settings.LM_STUDIO_API_KEY
@@ -17,8 +21,12 @@ class CompressionEngine:
 
     def _deep_merge(self, base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Recursively merges an incoming LLM delta update into the base knowledge state.
-        Prevents destructive overwrites of adjacent nested structural properties.
+        Recursively merges an incoming structural delta dictionary into a base dictionary.
+        
+        Mechanical behavior:
+        - If a key exists in both and both values are dictionaries, it recurses.
+        - If a key is an array or string, or doesn't exist in base, it updates/overwrites.
+        - Preserves adjacent, untouched sibling keys completely at every depth level.
         """
         for key, value in delta.items():
             if isinstance(value, dict) and key in base and isinstance(base[key], dict):
@@ -29,10 +37,11 @@ class CompressionEngine:
 
     def _call_llm_for_knowledge_merge(self, current_knowledge: Dict[str, Any], raw_chunk: str) -> Dict[str, Any]:
         """
-        Asks the local model to identify and extract ONLY new updates or changed facts.
-        Stitches the payload back together using a native Python deep-merge utility.
+        Issues a synchronous request to the local model to parse a text chunk and extract
+        ONLY new, modified, or updated structural facts. Synthesizes the final dictionary
+        in-memory via a native Python merge utility.
         """
-        # Streamlined prompt focused strictly on delta generation rather than macro-state retention
+        # Abstracted architecture prompt preventing model-priming or key-leakage biases
         system_prompt = (
             "You are a sharp, high-fidelity technical extraction engine. You never run code or write conversational fluff.\n"
             "Your task is to analyze a new conversation transcript chunk and extract workspace updates, architecture constraints, dependencies, or workflow states.\n\n"
@@ -59,7 +68,7 @@ class CompressionEngine:
             "}"
         )
 
-        # We pass the current state strictly as reference context, minimizing model generation load
+        # Presenting the existing state purely as an immutable reference container
         user_payload = {
             "Existing Context Reference": current_knowledge,
             "New Conversation Transcript Chunk": raw_chunk
@@ -78,14 +87,15 @@ class CompressionEngine:
             
             raw_content = response.choices[0].message.content.strip()
             
+            # Catch raw unpopulated strings or unresolved thinking loops early
             if not raw_content or raw_content.endswith("</think>"):
                 return current_knowledge
 
-            # Universal Thought Stripper
+            # Universal Thought Stripper: Clean tag structures before attempting JSON boundaries
             clean_content = re.sub(r'<(think|thinking|thought)>[\s\S]*?</\1>', '', raw_content, flags=re.IGNORECASE).strip()
             clean_content = re.sub(r'\[(think|thinking|thought)\][\s\S]*?\[/\1\]', '', clean_content, flags=re.IGNORECASE).strip()
 
-            # Isolate the targeted JSON structure boundary
+            # Find outer object limits cleanly
             json_match = re.search(r'(\{[\s\S]*\})', clean_content)
             if json_match:
                 clean_json_str = json_match.group(1).strip()
@@ -93,25 +103,29 @@ class CompressionEngine:
                 try:
                     delta_payload = json.loads(clean_json_str)
                 except json.JSONDecodeError:
-                    # Basic patch routines for raw unescaped strings
+                    # Auto-repair loose quote serialization common in small model outputs
                     try:
                         fixed_json_str = clean_json_str.replace("'", '"')
                         fixed_json_str = re.sub(r'\\(?!["\\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', fixed_json_str)
                         delta_payload = json.loads(fixed_json_str)
                     except Exception:
-                        raise ValueError("JSON delta structural format could not be verified.")
+                        raise ValueError("JSON payload formatting could not be verified by parsing engines.")
 
-                # Executing the merge inside safe native memory structures
+                # DIVERGENCE POINT: Combine the state in memory deterministically using Python
                 return self._deep_merge(current_knowledge, delta_payload)
             else:
                 return current_knowledge
 
         except Exception as e:
-            print(f"Extraction pipeline bypass: {e}")
+            print(f"Extraction pipeline bypass encountered: {e}")
             return current_knowledge
 
-    def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str):
-        """Executes sliding window compression with partial message splitting."""
+    def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str) -> Dict[str, Any]:
+        """
+        Orchestrates sliding window splitting, tokens diagnostics, historical extraction,
+        and database committing loops for an active project workspace.
+        """
+        # Pull down native nested dicts from your migrated SQLAlchemy JSON schema
         active_knowledge = get_project_knowledge(db, project_id)
         
         total_raw_text = "\n".join([f"{m['role']}: {m['content']}" for m in incoming_messages])
@@ -123,7 +137,7 @@ class CompressionEngine:
         
         msgs_to_process = list(incoming_messages)
         
-        # 1. Distribute context into Hot Tail vs. Older History
+        # 1. Split hot trailing context window away from history bounds
         while msgs_to_process:
             msg = msgs_to_process.pop()
             msg_len = tracker.count_tokens(msg['content'])
@@ -151,7 +165,7 @@ class CompressionEngine:
         
         historical_messages.reverse()
 
-        # 2. Process historical text slices through the LLM
+        # 2. Iterate slice windows over chronological history segments
         historical_text = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in historical_messages])
         raw_tokens_list = tracker.split_into_tokens(historical_text)
         
@@ -164,7 +178,7 @@ class CompressionEngine:
             decoded_chunk = tracker.decode_tokens(token_slice)
             active_knowledge = self._call_llm_for_knowledge_merge(active_knowledge, decoded_chunk)
 
-        # 3. Complete structural logging updates
+        # 3. Calculate structural token footprint and log updates to SQLite
         compressed_summary_block = "=== ADAPTIVE PROJECT CONTEXT ===\n" + json.dumps(active_knowledge, indent=2)
         compressed_payload_tokens = tracker.count_tokens(compressed_summary_block) + tail_tokens
         
@@ -173,7 +187,7 @@ class CompressionEngine:
             raw_tokens=raw_token_count, compressed_tokens=compressed_payload_tokens
         )
         
-        # Native integration - passes clean structural dictionary maps directly
+        # Passes pure, un-serialized native Python dictionary to database layer
         update_adaptive_knowledge(
             db=db, project_id=project_id, session_id=session_record.id,
             updated_knowledge=active_knowledge
