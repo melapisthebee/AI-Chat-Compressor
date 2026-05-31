@@ -91,7 +91,7 @@ Should output something like `pip 26.1.1 from C:\\\\\\\\Python314\\\\\\\\Lib\\\\
 
 
 
-4: Fill the `.env` with your LM Studio URL, API Token, and Model of choice. 
+4: Fill the `.env` file in the program's root directory with your LM Studio URL, API Token, and Model of choice. 
 
 
 
