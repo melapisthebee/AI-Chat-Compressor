@@ -1,10 +1,3 @@
-TODO: Migrate state merging logic from LLM prompt to native Python code
------------------------------------------------------------------------------
-[X] Refactor engine/compression.py to have the LLM return ONLY fresh updates or newly extracted facts instead of the entire mutated JSON tree.
-[X] Implement a native Python deep-merge utility (e.g., recursive dict update) to stitch current database records together with the incoming LLM payload.
-[X] Streamline the system prompt in engine/compression.py by removing macro inheritance mandates, cutting prompt token overhead and completely eliminating the risk of small-model sub-key pruning.
-[X] Add validation/soft-delete safety check to database/queries.py (`update_adaptive_knowledge`) to ensure a category key isn't dropped if the incoming text block simply didn't touch on that domain or if the model response was truncated.
-
 TODO: Optimize Context Ingestion, Token Density, and Multi-Type Parsing Handlers
 ---------------------------------------------------------------------------------
 [ ] Implement Tool Output / Data Listing Truncation Layer in engine/parser.py:
