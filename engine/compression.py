@@ -21,12 +21,8 @@ class CompressionEngine:
 
     def _deep_merge(self, base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Recursively merges an incoming structural delta dictionary into a base dictionary.
-        
-        Mechanical behavior:
-        - If a key exists in both and both values are dictionaries, it recurses.
-        - If a key is an array or string, or doesn't exist in base, it updates/overwrites.
-        - Preserves adjacent, untouched sibling keys completely at every depth level.
+        Recursively updates the base dictionary structure with fresh delta attributes.
+        Preserves untouched sibling keys at all depths of the nested JSON tree.
         """
         for key, value in delta.items():
             if isinstance(value, dict) and key in base and isinstance(base[key], dict):
@@ -37,17 +33,14 @@ class CompressionEngine:
 
     def _call_llm_for_knowledge_merge(self, current_knowledge: Dict[str, Any], raw_chunk: str) -> Dict[str, Any]:
         """
-        Issues a synchronous request to the local model to parse a text chunk and extract
-        ONLY new, modified, or updated structural facts. Synthesizes the final dictionary
-        in-memory via a native Python merge utility.
+        Asks the local model to extract ONLY brand new updates, modifications, or active deltas.
         """
-        # Abstracted architecture prompt preventing model-priming or key-leakage biases
         system_prompt = (
             "You are a sharp, high-fidelity technical extraction engine. You never run code or write conversational fluff.\n"
             "Your task is to analyze a new conversation transcript chunk and extract workspace updates, architecture constraints, dependencies, or workflow states.\n\n"
             "CRITICAL CONSTRAINTS:\n"
             "1. Output ONLY a raw JSON object containing the NEW, UPDATED, or CHANGED components. Do NOT replicate unchanged categories or historical records.\n"
-            "2. Structure extractions dynamically by grouping related files or tools under abstract, high-level structural layer keys that describe their architectural domain (e.g., matching the folder name or logical layer).\n"
+            "2. Structure extractions dynamically by grouping related files or tools under abstract, high-level structural layer keys that describe their architectural domain.\n"
             "3. Never output introductory conversational text, explanations, markdown fences, or <think> tags. Output exactly one valid JSON object.\n\n"
             "Format structure example for deltas:\n"
             "{\n"
@@ -68,7 +61,6 @@ class CompressionEngine:
             "}"
         )
 
-        # Presenting the existing state purely as an immutable reference container
         user_payload = {
             "Existing Context Reference": current_knowledge,
             "New Conversation Transcript Chunk": raw_chunk
@@ -178,19 +170,22 @@ class CompressionEngine:
             decoded_chunk = tracker.decode_tokens(token_slice)
             active_knowledge = self._call_llm_for_knowledge_merge(active_knowledge, decoded_chunk)
 
-        # 3. Calculate structural token footprint and log updates to SQLite
+        # 3. Complete structural logging updates
         compressed_summary_block = "=== ADAPTIVE PROJECT CONTEXT ===\n" + json.dumps(active_knowledge, indent=2)
         compressed_payload_tokens = tracker.count_tokens(compressed_summary_block) + tail_tokens
-        
+
         session_record = create_session_record(
             db=db, project_id=project_id, filename=filename,
             raw_tokens=raw_token_count, compressed_tokens=compressed_payload_tokens
         )
-        
-        # Passes pure, un-serialized native Python dictionary to database layer
+
+        # FIXED: Now forwarding the complete historical_text string as the raw validation context
         update_adaptive_knowledge(
-            db=db, project_id=project_id, session_id=session_record.id,
-            updated_knowledge=active_knowledge
+            db=db, 
+            project_id=project_id, 
+            session_id=session_record.id,
+            updated_knowledge=active_knowledge,
+            raw_context_stream=historical_text  # Feeds the keyword validator layer
         )
-        
+
         return active_knowledge

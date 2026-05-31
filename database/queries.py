@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session
@@ -54,7 +55,8 @@ def update_adaptive_knowledge(
     db: Session, 
     project_id: int, 
     session_id: int, 
-    updated_knowledge: Dict[str, Any]
+    updated_knowledge: Dict[str, Any],
+    raw_context_stream: Optional[str] = None
 ):
     """
     The core adaptive engine routine. 
@@ -64,6 +66,11 @@ def update_adaptive_knowledge(
     CRITICAL GUARDRAIL: If the incoming update payload is completely empty, it is 
     treated as a model generation or truncation fault, and deletions are skipped 
     to preserve existing data states.
+    
+    SEMANTIC OMISSION CHECK: If an existing category is missing from the update, 
+    the system checks if keywords from that category were even mentioned in the 
+    raw text stream. If not, the omission is treated as context exclusion rather 
+    than a true deletion request, preserving the historical record.
     """
     # 1. Fetch current stored knowledge records for this project
     existing_records = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
@@ -87,12 +94,22 @@ def update_adaptive_knowledge(
             )
             db.add(new_record)
             
-    # 3. Handle deletions with structural truncation guardrail
-    # If the LLM completely blanks out or fails parsing, updated_knowledge might be empty.
-    # We only process deprecations if we actually received a valid, populated state tree.
+    # 3. Handle deletions with structural truncation and semantic omission guardrails
     if updated_knowledge:
         for category, old_record in existing_map.items():
             if category not in updated_knowledge:
+                
+                # Semantic validation check
+                if raw_context_stream:
+                    normalized_stream = raw_context_stream.lower()
+                    # Extract alphanumeric keyword parts (e.g., "database_layer" -> ["database", "layer"])
+                    keywords = re.findall(r'\w+', category.lower())
+                    
+                    # If descriptive category keys were completely absent from the processed text chunk,
+                    # the file simply didn't contain info on this domain. Skip deletion to protect state.
+                    if keywords and not any(kw in normalized_stream for kw in keywords):
+                        continue  # Safe bypass
+                
                 db.delete(old_record)
                 
     # 4. Touch the project timestamp to show it was modified
