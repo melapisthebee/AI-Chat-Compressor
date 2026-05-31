@@ -111,80 +111,115 @@ class CompressionEngine:
         except Exception as e:
             raise RuntimeError(f"LM Studio API Connection Failure: {str(e)}")
 
-    def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str) -> Dict[str, Any]:
-        """
-        Orchestrates sliding window splitting, tokens diagnostics, historical extraction,
-        and database committing loops for an active project workspace.
-        """
-        # Pull down native nested dicts from your migrated SQLAlchemy JSON schema
-        active_knowledge = get_project_knowledge(db, project_id)
-        
-        total_raw_text = "\n".join([f"{m['role']}: {m['content']}" for m in incoming_messages])
-        raw_token_count = tracker.count_tokens(total_raw_text)
-        
-        tail_messages = []
-        historical_messages = []
-        tail_tokens = 0
-        
-        msgs_to_process = list(incoming_messages)
-        
-        # 1. Split hot trailing context window away from history bounds
-        while msgs_to_process:
-            msg = msgs_to_process.pop()
-            msg_len = tracker.count_tokens(msg['content'])
+    def _call_llm_for_verification(self, current_knowledge: Dict[str, Any], raw_chunk: str) -> Dict[str, Any]:
+            """
+            PASS 2 (Audit): Compares the current draft knowledge state against a specific source chunk.
+            Returns a delta dictionary ONLY if gaps or hallucinations are detected.
+            """
+            system_prompt = (
+                "You are a Quality Assurance Auditor for an LLM Knowledge extraction system.\n"
+                "Your task is to compare an existing Knowledge State against a Raw Text Chunk.\n"
+                "1. If the knowledge state is comprehensive and accurate based on the chunk, return an empty JSON object: {}\n"
+                "2. If the chunk contains critical information NOT present in the knowledge state, OR if the state contains hallucinations contradicted by the chunk, output a JSON object with ONLY the corrections/additions.\n"
+                "3. Do not replicate the full state. Output only the delta (key-value pairs to update or add).\n"
+                "4. Never output conversational text, explanations, or markdown fences. Return valid JSON only."
+            )
+
+            user_payload = {
+                "Draft Knowledge State": current_knowledge,
+                "Source Text Chunk": raw_chunk
+            }
+
+            try:
+                response = self.client.chat.completions.create(
+                    model=settings.DEFAULT_COMPRESSION_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": json.dumps(user_payload, indent=2)}
+                    ],
+                    temperature=0.0,
+                    response_format={"type": "text"}
+                )
+                
+                return self._extract_json_from_response(response.choices[0].message.content)
+                
+            except Exception as e:
+                # Audit failures should not crash the pipeline; log and return empty delta (no changes)
+                print(f"Audit pass warning: {e}")
+                return {}
             
-            if tail_tokens + msg_len <= settings.PRESERVE_RECENT_TOKENS:
-                tail_messages.insert(0, msg)
-                tail_tokens += msg_len
-            else:
-                remaining_tail_budget = settings.PRESERVE_RECENT_TOKENS - tail_tokens
+
+    def _extract_json_from_response(self, content: str) -> Dict[str, Any]:
+            """Centralized parser for LLM responses to ensure structural integrity."""
+            # Clean thoughts
+            clean_content = re.sub(r'<(think|thinking|thought)>[\s\S]*?</\1>', '', content, flags=re.IGNORECASE).strip()
+            clean_content = re.sub(r'\[(think|thinking|thought)\][\s\S]*?\[/\1\]', '', clean_content, flags=re.IGNORECASE).strip()
+            
+            json_match = re.search(r'(\{[\s\S]*\})', clean_content)
+            if json_match:
+                try:
+                    return json.loads(json_match.group(1))
+                except json.JSONDecodeError:
+                    # Attempt light repair
+                    fixed = json_match.group(1).replace("'", '"')
+                    try:
+                        return json.loads(fixed)
+                    except:
+                        return {}
+            return {}
+
+    def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str) -> Dict[str, Any]:
+            """
+            Orchestrates the two-pass 'Map-Verify' pipeline:
+            1. Extract: Slices and extracts draft knowledge states.
+            2. Audit: Validates draft states against source text.
+            3. Commit: Updates the adaptive knowledge core.
+            """
+            # Load baseline
+            active_knowledge = get_project_knowledge(db, project_id)
+            
+            # Prepare text streams
+            total_raw_text = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in incoming_messages])
+            raw_token_count = tracker.count_tokens(total_raw_text)
+            
+            # Slicing logic
+            raw_tokens_list = tracker.split_into_tokens(total_raw_text)
+            chunk_size = settings.CHUNK_SIZE_TOKENS
+            token_slices = [raw_tokens_list[i:i + chunk_size] for i in range(0, len(raw_tokens_list), chunk_size)]
+            
+            # PASS 1: EXTRACTION
+            print(f"Extraction Pass: Processing {len(token_slices)} segments...")
+            for token_slice in token_slices:
+                decoded_chunk = tracker.decode_tokens(token_slice)
+                delta = self._call_llm_for_knowledge_merge(active_knowledge, decoded_chunk)
+                active_knowledge = self._deep_merge(active_knowledge, delta)
                 
-                if remaining_tail_budget > 0:
-                    tokens = tracker.split_into_tokens(msg['content'])
-                    tail_ids = tokens[-remaining_tail_budget:]
-                    hist_ids = tokens[:-remaining_tail_budget]
-                    
-                    tail_messages.insert(0, {"role": msg['role'], "content": tracker.decode_tokens(tail_ids)})
-                    historical_messages.append({"role": msg['role'], "content": tracker.decode_tokens(hist_ids)})
-                    tail_tokens += remaining_tail_budget
-                else:
-                    historical_messages.append(msg)
-                
-                while msgs_to_process:
-                    historical_messages.append(msgs_to_process.pop())
-                break
-        
-        historical_messages.reverse()
+            # PASS 2: AUDIT
+            print(f"Audit Pass: Verifying state integrity...")
+            for token_slice in token_slices:
+                decoded_chunk = tracker.decode_tokens(token_slice)
+                audit_delta = self._call_llm_for_verification(active_knowledge, decoded_chunk)
+                if audit_delta:
+                    active_knowledge = self._deep_merge(active_knowledge, audit_delta)
 
-        # 2. Iterate slice windows over chronological history segments
-        historical_text = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in historical_messages])
-        raw_tokens_list = tracker.split_into_tokens(historical_text)
-        
-        chunk_size = settings.CHUNK_SIZE_TOKENS
-        token_slices = [raw_tokens_list[i:i + chunk_size] for i in range(0, len(raw_tokens_list), chunk_size)]
-        
-        print(f"Slicing historical segment into {len(token_slices)} text chunks for synthesis...")
-        
-        for token_slice in token_slices:
-            decoded_chunk = tracker.decode_tokens(token_slice)
-            active_knowledge = self._call_llm_for_knowledge_merge(active_knowledge, decoded_chunk)
+            # COMMIT
+            compressed_summary_block = json.dumps(active_knowledge)
+            compressed_payload_tokens = tracker.count_tokens(compressed_summary_block)
 
-        # 3. Complete structural logging updates
-        compressed_summary_block = "=== ADAPTIVE PROJECT CONTEXT ===\n" + json.dumps(active_knowledge, indent=2)
-        compressed_payload_tokens = tracker.count_tokens(compressed_summary_block) + tail_tokens
+            session_record = create_session_record(
+                db=db, 
+                project_id=project_id, 
+                filename=filename,
+                raw_tokens=raw_token_count, 
+                compressed_tokens=compressed_payload_tokens
+            )
 
-        session_record = create_session_record(
-            db=db, project_id=project_id, filename=filename,
-            raw_tokens=raw_token_count, compressed_tokens=compressed_payload_tokens
-        )
-
-        # FIXED: Now forwarding the complete historical_text string as the raw validation context
-        update_adaptive_knowledge(
-            db=db, 
-            project_id=project_id, 
-            session_id=session_record.id,
-            updated_knowledge=active_knowledge,
-            raw_context_stream=historical_text  # Feeds the keyword validator layer
-        )
-
-        return active_knowledge
+            update_adaptive_knowledge(
+                db=db, 
+                project_id=project_id, 
+                session_id=session_record.id,
+                updated_knowledge=active_knowledge,
+                raw_context_stream=total_raw_text
+            )
+            
+            return active_knowledge
