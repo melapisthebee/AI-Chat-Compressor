@@ -1,92 +1,72 @@
-========INFO========
+=============START=============
 
 
 
 
 
-Hello! 
+Welcome!
 
 
 
-This is the lm-compressor! 
+This is the AI Chat Compressor, shortened to "lm-compressor" in the root directory. This project was
 
+&#x09;built specifically for LM Studio.
 
 
-The overall goal of this project was to take a large conversation saved as either a .txt, .pdf, .json, or .md file, and compress it into a significantly smaller snippet of pure data.
 
+The purpose of this program, in a nutshell, is to compress a large conversation
 
+&#x09;in the format of ".txt", ".pdf", ".md", and/or ".json", into a significantly smaller,
 
-This form of compression will not preserve any code snippets or conversational data. 
+&#x09;high quality, structurally based json stored inside of a manipulatable SQLite based DataBase file.
 
 
 
-Just the pure file paths and basic architecture of the project you are presumably working on.
+These json files, which we will refer to as "projects" from this moment forward, can be retrieved at any time. All that
 
+&#x09;is required is for the database file(.db) inside of "./storage/" to remain intact and secured.
 
 
-This project uses SLQLite to store "Data Sets" of the past conversational data. 
 
 
 
-You can update these "Data Sets" (We will call them projects) by clicking on it and dropping in the new project data.
+============WARNING============
 
 
 
 
 
-=======WARNING=======
+This program is in an ALPHA state, and is delivered AS-IS. 
 
 
 
+The developer(s), contributor(s), maintainer(s), owner(s), and hosting service(s)
 
+&#x09;are not responsible for any lost, damaged, and/or destroyed software and/or
 
-This project is in it's Alpha stage. 
+&#x09;hardware that this program may or may not cause.
 
 
 
-Expect bugs and unpredictable behavior. 
 
 
+============QUICK START============
 
-It is not recommended to use this for enterprise. 
+It's quick because it's easy.
 
 
 
-It's not recommended to use AI for enterprise in general. 
+1: `Ensure python is installed.`
 
+	Verify with `python -m pip --version` : 
 
+&#x09;Should output something like `pip 26.1.1 from C:\\Python314\\Lib\\site-packages\\pip (python 3.14)`
 
-I'm talking about you MicroSlop.
 
 
 
 
-
-=======QUICK START=======
-
-
-
-
-
-It's quick because it's easy. Just follow along and I'm sure you will be fine.
-
-
-
-1: Ensure python is installed.
-
-&#x09;I'm sure it is, just want to make sure you can run the program. 
-
-Use Google to assist with this if you haven't installed python yet. 
-
-If you can't install python, sucks to be you.
-
-
-
-2: Create the python virtual environment.
-
-&#x09;This is a straight-forward process. 
-
-Just do as I say and everything will be sunshine and rainbows.
+2: `Create the python virtual environment.`
 
 &#x20;
 
@@ -108,13 +88,15 @@ Congrats! You made a Python Virtual Environment!
 
 
 
-Depending on your internet and compute, the time to install everything varies from less than 30 seconds to never.
+Depending on your internet and compute,
+
+the time to install everything varies from less than 30 seconds to never.
 
 
 
 4: Fill the .env (Environment file) with your URL endpoint, API Token, and model of choice.
 
-If you are missing the file, you should create it ".env" in the project root. 
+If you are missing the file, you should create it ".env" in the project root.
 
 This is the same directory as the README.md.
 
@@ -138,75 +120,57 @@ DEFAULT\_COMPRESSION\_MODEL="qwopus3.5-9b-coder-mtp"
 
 
 
-=======HOW TO RUN=======
+============HOW TO RUN============
 
 
 
 
 
-Operating the project is very straight forward. 
+Operating the project is very straight forward.
 
-Making sure to run the project inside the venv(see above), you are to type the name of the project(or click a previously made project), drag and drop a ".md", a ".txt", a ".json", or a ".pdf" file inside of the top window. 
+Making sure to run the project inside the venv(see above),
 
-The program will automatically start the compression. 
+&#x09;you are to type the name of the project(or click a previously made project),
 
-You can then click the "Copy Context State" button once the program finished compression. You can choose to not copy it and close the program due to the existence of the database at "/storage". 
+&#x09;drag and drop a ".md", a ".txt", a ".json", or a ".pdf" file inside of the top window.
 
-Deleting this .db file will wipe all projects, so be cautious. 
+The program will automatically start the compression.
 
+You can then click the "Copy Context State" button once the program finished compression.
 
+You can choose to not copy it and close the program due to the existence of the database at "/storage".
 
-
-
-=======CONTRIBUTING=======
-
-
-
-Artificial Intelligence is a powerful tool, but it is not a replacement for human intellect and our ability to create and innovate. 
-
-
-
-At the end of the day, AI is a complex autocomplete, regardless of it's architecture. 
-
-
-
-Because of this inherit limitation, autocompleted code has to be viewed as flawed and defective until proven not though extensive tests and review. 
-
-
-
-AI was used to aid in the creation of this program, so AI is allowed to aid in the assistance of adding features and fixing potential/ current issues. 
-
-
-
-If AI is used, you MUST disclose that it has been used so the proper testing can be run on the pull request in question. 
-
-
-
-AI is NOT allowed to create issue or pull requests. 
-
-
-
-If AI is used to add feature and/or fix issues, then you must AT LEAST be able to write in your own words what the added/modified code does and how it aligns with the projects core function. 
-
-
-
-=======INFO=======
+Deleting this .db file will wipe all projects, so be cautious.
 
 
 
 
 
-This program is delivered AS-IS. 
-
-If something goes catastrophic with your computational device, the developer(s), contributor(s), and maintainer(s) of this program are not responsible.
+============CONTRIBUTING============
 
 
 
-See LISCENSE.md for the ToS of this program.
+Artificial Intelligence is a powerful tool, but it is not a replacement for human intellect and our ability to create and innovate.
+
+At the end of the day, AI is a complex autocomplete, regardless of it's architecture.
+
+Because of this inherit limitation, autocompleted code has to be viewed as flawed and defective until proven not though extensive tests and review.
+
+AI was used to aid in the creation of this program, so AI is allowed to aid in the assistance of adding features and fixing potential/ current issues.
+
+If AI is used, you MUST disclose that it has been used so the proper testing can be run on the pull request in question.
+
+AI is NOT allowed to create issue or pull requests.
+
+If AI is used to add feature and/or fix issues,
+
+&#x09;then you must AT LEAST be able to write in your own words what the added/modified code does and how it aligns with the projects core function.
+
+&#x09;This is for everyone's benefit. You get to Vibe-Code, so we get to verify.
 
 
 
+=============\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_=============
 
-
-Edited: 05/30/2026
+&#x09;      Edited: 05/30/2026
 

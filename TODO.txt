@@ -1,9 +1,4 @@
- Add retry logic with exponential backoff for database is locked errors
- Test multi-threaded scenarios to verify no race conditions
-
-
-3. Critical Error Handling
- Wrap JSON parsing in try/except blocks in engine/parser.py:_parse_json_pipeline()
+    Wrap JSON parsing in try/except blocks in engine/parser.py:_parse_json_pipeline()
  Add timeout configuration to LLM API calls (suggested: 60 seconds)
  Implement retry mechanism for transient network failures
  Create user-friendly error dialogs instead of generic crash messages
