@@ -36,7 +36,7 @@ These json files, which we will refer to as "projects" from this moment forward,
 
 
 
-This program is in an ALPHA state, and is delivered AS-IS. 
+This program is in an ALPHA state, and is delivered AS-IS.
 
 
 
@@ -58,9 +58,10 @@ It's quick because it's easy.
 
 1: `Ensure python is installed.`
 
-	Verify with `python -m pip --version` : 
 
-&#x09;Should output something like `pip 26.1.1 from C:\\Python314\\Lib\\site-packages\\pip (python 3.14)`
+
+&#x09;Verify with `python -m pip --version` : 
+	Should output something like `pip 26.1.1 from C:\\\\Python314\\\\Lib\\\\site-packages\\\\pip (python 3.14)`
 
 
 
@@ -70,11 +71,11 @@ It's quick because it's easy.
 
 &#x20;
 
-&#x09;"python -m venv .venv"
+&#x09;Run `python -m venv .venv` in `lm-compressor/` :
+
+&#x09;Should see a `.venv` appear in the directory
 
 
-
-Congrats! You made a Python Virtual Environment!
 
 
 
@@ -82,15 +83,27 @@ Congrats! You made a Python Virtual Environment!
 
 &#x09;
 
-&#x09;a: "./.venv/Scripts/activate"
+&#x09;Run `./.venv/Scripts/activate` :
 
-&#x09;b: "pip install -r requirements.txt"
+&#x09;then `pip install -r requirements.txt`
 
 
 
-Depending on your internet and compute,
 
-the time to install everything varies from less than 30 seconds to never.
+
+4:
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
