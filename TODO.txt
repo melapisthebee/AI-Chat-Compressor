@@ -1,6 +1,6 @@
 TODO: Migrating knowledge_core table schema to use native SQLAlchemy JSON types
 ---------------------------------------------------------------------------------
-[ ] Update database/models.py: Change content column type from Text to JSON.
+[X] Update database/models.py: Change content column type from Text to JSON.
     -> Code: content = Column(JSON)
 [ ] Handle schema application (Choose one):
     - Option 1: Drop existing local SQLite file to let tables recreate cleanly on next run.

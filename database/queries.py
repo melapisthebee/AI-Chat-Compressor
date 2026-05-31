@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session
 from database.models import Project, Session as ChatSession, KnowledgeCore
 
@@ -21,11 +21,10 @@ def list_all_projects(db: Session) -> List[Project]:
     """
     return db.query(Project).order_by(Project.updated_at.desc()).all()
 
-def get_project_knowledge(db: Session, project_id: int) -> Dict[str, str]:
+def get_project_knowledge(db: Session, project_id: int) -> Dict[str, Any]:
     """
     Gathers all current knowledge entries for a project.
-    Returns a dictionary mapping categories to their content string.
-    Example: {"architecture": "Uses SQLite...", "todos": "Fix login bug..."}
+    Returns a dictionary mapping categories to their native JSON structures/dicts.
     """
     entries = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
     return {entry.category: entry.content for entry in entries}
@@ -55,15 +54,16 @@ def update_adaptive_knowledge(
     db: Session, 
     project_id: int, 
     session_id: int, 
-    updated_knowledge: Dict[str, str]
+    updated_knowledge: Dict[str, Any]
 ):
     """
     The core adaptive engine routine. 
-    Takes a dictionary of fresh knowledge chunks (e.g., from the LLM engine) 
+    Takes a dictionary of fresh knowledge chunks (native dict/JSON from LLM engine) 
     and updates existing categories or creates new ones.
     
-    If an existing category in the DB isn't provided in the updated_knowledge,
-    it implies it has been replaced/deprecated, so it gets removed.
+    CRITICAL GUARDRAIL: If the incoming update payload is completely empty, it is 
+    treated as a model generation or truncation fault, and deletions are skipped 
+    to preserve existing data states.
     """
     # 1. Fetch current stored knowledge records for this project
     existing_records = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
@@ -72,13 +72,13 @@ def update_adaptive_knowledge(
     # 2. Process updates and additions
     for category, fresh_content in updated_knowledge.items():
         if category in existing_map:
-            # Overwrite content if it changed
+            # Overwrite content if it changed (SQLAlchemy detects internal dict modifications)
             record = existing_map[category]
             record.content = fresh_content
             record.last_updated_by_session_id = session_id
             record.updated_at = datetime.utcnow()
         else:
-            # Create a brand new knowledge segment
+            # Create a brand new knowledge segment storing native JSON/dict
             new_record = KnowledgeCore(
                 project_id=project_id,
                 category=category,
@@ -87,11 +87,14 @@ def update_adaptive_knowledge(
             )
             db.add(new_record)
             
-    # 3. Handle deletions (stale information replaced or dropped by the LLM)
-    for category, old_record in existing_map.items():
-        if category not in updated_knowledge:
-            db.delete(old_record)
-            
+    # 3. Handle deletions with structural truncation guardrail
+    # If the LLM completely blanks out or fails parsing, updated_knowledge might be empty.
+    # We only process deprecations if we actually received a valid, populated state tree.
+    if updated_knowledge:
+        for category, old_record in existing_map.items():
+            if category not in updated_knowledge:
+                db.delete(old_record)
+                
     # 4. Touch the project timestamp to show it was modified
     project = db.query(Project).filter(Project.id == project_id).first()
     if project:
