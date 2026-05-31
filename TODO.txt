@@ -1,22 +1,120 @@
-TODO: Optimize Context Ingestion, Token Density, and Multi-Type Parsing Handlers
----------------------------------------------------------------------------------
-[ ] Implement Tool Output / Data Listing Truncation Layer in engine/parser.py:
-    - Add regex/logic checks to detect automated XML tags (<tool_call>, <tool_response>) or deep text blocks dominated by file list patterns.
-    - Truncate data dumps crossing a specific line threshold (e.g., max_lines = 15) to a tiny head/tail summary, isolating the model from token noise.
-[ ] Refactor engine/parser.py into Independent Extension Parsing Pipelines:
-    - JSON Parser: Native structural load via dictionary mapping (Completed).
-    - MD Parser: Specialized check for markdown headers and code fence block skips.
-    - TXT Parser: Lightweight, lightning-fast regex splitting without code fence tracking overhead.
-    - PDF Parser: Sanitize line fragmentation caused by page extraction coordinates before token split validation.
-[ ] Update `parse_lm_studio_file` regex in engine/parser.py to evaluate markdown code block fences properly, ensuring literal string examples of `<think>` inside code blocks are ignored and not purged.
+ 2.
+ Add SQLite timeout parameter to connection string:
+python
+connect_args={"check_same_thread": False, "timeout": 30}
+ Implement database operation mutex for concurrent GUI write access
+ Add retry logic with exponential backoff for database is locked errors
+ Test multi-threaded scenarios to verify no race conditions
 
-TODO: Robustness, Memory Safety & Parsing Recovery Trackers
----------------------------------------------------------------------------------
-[ ] Integrate Robust Delimiter-Based Parsing / Schema-Guided Recovery Layer:
-    - Upgrade the JSON repair logic in engine/compression.py to utilize a robust parser strategy (e.g., a utility like robust-json).
-    - Ensure extraction can safely ignore loose model comments, handle trailing object commas, and recover usable schemas from partially truncated strings.
-[ ] Implement Multi-Threaded Thread Safety & QThread Lifecycle Protections:
-    - Audit background workflow lifecycles inside gui/main_window.py.
-    - Standardize thread shutdown routes to explicitly enforce the Quit-Wait execution pattern (worker.quit() followed by worker.wait()) to eliminate testing/production resource leaks.
-[ ] Update engine initialization in database/connection.py to include a busy timeout configuration (`connect_args={"check_same_thread": False, "timeout": 30}`) to mitigate multi-threaded `OperationalError: database is locked` write contentions during simultaneous background operations.
-[ ] Update worker spawning loop in gui/main_window.py to explicitly connect the worker thread's `finished` signal to its own `deleteLater` slot, ensuring safe object deletion upon pipeline completion.
+
+3. Critical Error Handling
+ Wrap JSON parsing in try/except blocks in engine/parser.py:_parse_json_pipeline()
+ Add timeout configuration to LLM API calls (suggested: 60 seconds)
+ Implement retry mechanism for transient network failures
+ Create user-friendly error dialogs instead of generic crash messages
+
+
+ 4. Parser Module Refactoring
+  Decompose engine/parser.py into format-specific classes:
+ python
+ BaseParser/JSONParser/MarkdownParser/PDFParser/TXTParser
+  Implement schema-guided recovery for malformed JSON files
+  Add file size validation (max supported: e.g., 50MB or 200k tokens)
+  Create parser performance benchmarks to measure processing time
+
+
+ 5. Enhanced Token Management
+  Implement streaming chunk processing for memory efficiency on large files
+  Add configurable token budget settings via UI (default: MAX_TARGET_TOKENS=10000)
+  Create token usage dashboard showing compression ratio per project
+  Optimize sliding window overlap logic to prevent context fragmentation
+
+
+ 6. Tool Output & Data Dump Handling (TODO #1 - PARTIALLY COMPLETE)
+  Complete truncation layer implementation:
+ python
+ # Detect automated XML tags: <tool_output>, <function=...>
+ # Truncate data listings beyond max_lines = 15
+ # Keep head/tail summary only
+  Test with various tool output formats (JSON RPC, markdown tables, etc.)
+  Add configuration toggle for truncation aggressiveness
+
+
+ 7. JSON Recovery Enhancement
+  Integrate json-repair or similar library instead of custom regex cleanup
+  Implement progressive recovery strategies:
+ Try exact parse
+ Try with thought tag removal
+ Try character-level repair
+ Fallback to empty delta (preserve existing state)
+
+
+ 8. UI/UX Improvements
+  Add progress bar for long-running compression operations
+  Create status indicator showing: Idle → Parsing → Compression → Audit → Complete/Error
+  Implement conversation preview panel before processing
+  Add "Test Connection" button for LM Studio API validation
+  Create project history timeline view to visualize knowledge evolution
+
+
+ 9. Knowledge Core Enhancement
+
+  Improve category matching algorithm in update_adaptive_knowledge():
+ python
+ # Replace simple keyword matching with:
+ # - TF-IDF scoring
+ # - Semantic similarity (optional embedding model)
+ # - Configurable sensitivity thresholds
+  Add knowledge conflict detection when new data contradicts existing records
+  Implement manual knowledge editing interface in GUI
+
+
+ 10. Multi-file Processing Support
+  Allow batch file drops (multiple conversations at once)
+  Create queue management system for sequential processing
+  Add parallel processing option with configurable worker count
+  Implement project merge functionality to combine related conversations
+
+
+ 11. Export & Integration Features
+  Export knowledge state formats:
+ JSON (for programmatic use)
+ Markdown (readable documentation)
+ CSV (tabular analysis)
+  Add API endpoint for headless operation (Flask/FastAPI optional)
+  Support LLM output format selection (JSON, XML, plain text)
+
+
+2. Performance Optimizations
+ Implement caching layer for previously processed files (hash-based detection)
+ Profile and optimize tokenization bottlenecks with cProfile/line_profiler
+ Add database connection pooling using SQLAlchemy QueuePool
+ Compress stored JSON knowledge blobs to reduce storage footprint
+
+
+13. Testing Infrastructure
+ Set up pytest framework with coverage reporting
+ Create unit tests for:
+Token counting accuracy
+Credential redaction regex patterns
+Knowledge merge logic
+Parser format handling
+ Add integration tests for full compression pipelineS
+ Implement mock LLM service for offline testing
+
+
+14. Documentation & Onboarding
+ Create API documentation with OpenAPI/Swagger spec (if adding API endpoints)
+ Write developer contribution guide expanding existing README sections
+ Add inline code comments explaining complex logic in engine/compression.py
+ Create troubleshooting FAQ for common LM Studio configuration issues
+
+
+15. Logging & Monitoring
+ Replace print statements with proper logging:
+python
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+ Add structured log output (JSON format for parsing)
+ Create performance metrics dashboard (tokens processed, avg compression ratio, etc.)
