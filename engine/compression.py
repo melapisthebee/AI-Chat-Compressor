@@ -1,6 +1,6 @@
 import json
 import re
-from typing import List, Dict
+from typing import List, Dict, Any
 from openai import OpenAI
 from sqlalchemy.orm import Session as DBSession
 
@@ -15,37 +15,53 @@ class CompressionEngine:
             api_key=settings.LM_STUDIO_API_KEY
         )
 
-    def _call_llm_for_knowledge_merge(self, current_knowledge: Dict[str, str], raw_chunk: str) -> Dict[str, str]:
-        """Asks the local model to merge raw context into the existing project state."""
+    def _deep_merge(self, base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively merges an incoming LLM delta update into the base knowledge state.
+        Prevents destructive overwrites of adjacent nested structural properties.
+        """
+        for key, value in delta.items():
+            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+                self._deep_merge(base[key], value)
+            else:
+                base[key] = value
+        return base
+
+    def _call_llm_for_knowledge_merge(self, current_knowledge: Dict[str, Any], raw_chunk: str) -> Dict[str, Any]:
+        """
+        Asks the local model to identify and extract ONLY new updates or changed facts.
+        Stitches the payload back together using a native Python deep-merge utility.
+        """
+        # Streamlined prompt focused strictly on delta generation rather than macro-state retention
         system_prompt = (
-            "You are a strict data-serialization engine mapping developer workspaces. You never run code.\n"
-            "Your task is to update the 'Current Knowledge Categories' dictionary based on fresh log segments.\n\n"
-            "CRITICAL CONSTRAINTS & INHERITANCE RULES:\n"
-            "1. YOU MUST INHERIT AND PRESERVE ALL EXISTING CATEGORIES AND KEYS from 'Current Knowledge Categories'.\n"
-            "2. Do NOT delete, clear, or overwrite an existing configuration block unless explicitly told to.\n"
-            "3. HIGH-FIDELITY EXTRACTION REQUIRED: Group components under clear, high-level category keys that you invent based on the context (e.g., 'mcp_servers', 'frontend_modules', 'database_utilities').\n"
-            "4. Never output introductory conversational text or <think> tags. Output exactly one raw JSON object.\n\n"
-            "Format example:\n"
+            "You are a sharp, high-fidelity technical extraction engine. You never run code or write conversational fluff.\n"
+            "Your task is to analyze a new conversation transcript chunk and extract workspace updates, architecture constraints, dependencies, or workflow states.\n\n"
+            "CRITICAL CONSTRAINTS:\n"
+            "1. Output ONLY a raw JSON object containing the NEW, UPDATED, or CHANGED components. Do NOT replicate unchanged categories or historical records.\n"
+            "2. Structure extractions dynamically by grouping related files or tools under abstract, high-level structural layer keys that describe their architectural domain (e.g., matching the folder name or logical layer).\n"
+            "3. Never output introductory conversational text, explanations, markdown fences, or <think> tags. Output exactly one valid JSON object.\n\n"
+            "Format structure example for deltas:\n"
             "{\n"
-            "  \"<insert_system_group_name>\": {\n"
-            "    \"<insert_component_name>\": {\n"
+            "  \"<insert_architectural_layer_key>\": {\n"
+            "    \"<insert_file_or_component_name>\": {\n"
             "      \"command\": \"...\",\n"
             "      \"args\": [...],\n"
             "      \"workingDirectory\": \"...\",\n"
             "      \"dependencies\": [...],\n"
-            "      \"technical_notes\": \"Detailed engineering descriptions, rules, or paths go here...\"\n"
+            "      \"technical_notes\": \"Detailed engineering modifications or additions go here...\"\n"
             "    }\n"
             "  },\n"
             "  \"current_active_track\": {\n"
-            "    \"status\": \"Current workflow state (e.g., Debugging / Implementation / Testing)\",\n"
-            "    \"active_issue_or_bug\": \"Clear description of active errors, stack traces, or broken features...\",\n"
-            "    \"next_immediate_steps\": \"Bulleted string of the next mechanical steps to resume work seamlessly...\"\n"
+            "    \"status\": \"Updated workflow state\",\n"
+            "    \"active_issue_or_bug\": \"Description of errors or stack traces if identified...\",\n"
+            "    \"next_immediate_steps\": \"Updated scannable steps to resume work...\"\n"
             "  }\n"
             "}"
         )
 
+        # We pass the current state strictly as reference context, minimizing model generation load
         user_payload = {
-            "Current Knowledge Categories": current_knowledge,
+            "Existing Context Reference": current_knowledge,
             "New Conversation Transcript Chunk": raw_chunk
         }
 
@@ -65,27 +81,28 @@ class CompressionEngine:
             if not raw_content or raw_content.endswith("</think>"):
                 return current_knowledge
 
-            # Upgraded Universal Thought Stripper
-            # Uses a backreference (\1) to ensure matching open/close tags are cleanly wiped
+            # Universal Thought Stripper
             clean_content = re.sub(r'<(think|thinking|thought)>[\s\S]*?</\1>', '', raw_content, flags=re.IGNORECASE).strip()
             clean_content = re.sub(r'\[(think|thinking|thought)\][\s\S]*?\[/\1\]', '', clean_content, flags=re.IGNORECASE).strip()
 
-            # Now find the true outer JSON boundaries safely
+            # Isolate the targeted JSON structure boundary
             json_match = re.search(r'(\{[\s\S]*\})', clean_content)
             if json_match:
                 clean_json_str = json_match.group(1).strip()
                 
                 try:
-                    return json.loads(clean_json_str)
+                    delta_payload = json.loads(clean_json_str)
                 except json.JSONDecodeError:
-                    # SMART AUTO-REPAIR: Fix loose backslashes only if they aren't already valid JSON escapes
+                    # Basic patch routines for raw unescaped strings
                     try:
                         fixed_json_str = clean_json_str.replace("'", '"')
-                        # Doubling only single backslashes not followed by standard escape codes
                         fixed_json_str = re.sub(r'\\(?!["\\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', fixed_json_str)
-                        return json.loads(fixed_json_str)
+                        delta_payload = json.loads(fixed_json_str)
                     except Exception:
-                        raise ValueError("JSON structural formatting remains invalid after basic repair patches.")
+                        raise ValueError("JSON delta structural format could not be verified.")
+
+                # Executing the merge inside safe native memory structures
+                return self._deep_merge(current_knowledge, delta_payload)
             else:
                 return current_knowledge
 
@@ -104,7 +121,6 @@ class CompressionEngine:
         historical_messages = []
         tail_tokens = 0
         
-        # Copy message array to process backward safely
         msgs_to_process = list(incoming_messages)
         
         # 1. Distribute context into Hot Tail vs. Older History
@@ -112,12 +128,10 @@ class CompressionEngine:
             msg = msgs_to_process.pop()
             msg_len = tracker.count_tokens(msg['content'])
             
-            # If the entire message fits in the remaining tail budget, take it
             if tail_tokens + msg_len <= settings.PRESERVE_RECENT_TOKENS:
                 tail_messages.insert(0, msg)
                 tail_tokens += msg_len
             else:
-                # The message crosses the boundary. Split it!
                 remaining_tail_budget = settings.PRESERVE_RECENT_TOKENS - tail_tokens
                 
                 if remaining_tail_budget > 0:
@@ -131,12 +145,10 @@ class CompressionEngine:
                 else:
                     historical_messages.append(msg)
                 
-                # All remaining backward messages belong entirely to history
                 while msgs_to_process:
                     historical_messages.append(msgs_to_process.pop())
                 break
         
-        # Restore chronological order for historical tracking
         historical_messages.reverse()
 
         # 2. Process historical text slices through the LLM
@@ -161,7 +173,7 @@ class CompressionEngine:
             raw_tokens=raw_token_count, compressed_tokens=compressed_payload_tokens
         )
         
-        # PASS NATIVE DICTIONARIES - Do NOT use json.dumps() or wrap keys in string blocks!
+        # Native integration - passes clean structural dictionary maps directly
         update_adaptive_knowledge(
             db=db, project_id=project_id, session_id=session_record.id,
             updated_knowledge=active_knowledge

@@ -2,10 +2,10 @@ TODO: Migrating knowledge_core table schema to use native SQLAlchemy JSON types
 ---------------------------------------------------------------------------------
 [X] Update database/models.py: Change content column type from Text to JSON.
     -> Code: content = Column(JSON)
-[ ] Handle schema application (Choose one):
+[X] Handle schema application (Choose one):
     - Option 1: Drop existing local SQLite file to let tables recreate cleanly on next run.
     - Option 2: Setup Alembic migration if project history needs preservation.
-[ ] Remove manual json.dumps() dictionary serialization from engine/compression.py once ORM handling is native.
+[X] Remove manual json.dumps() dictionary serialization from engine/compression.py once ORM handling is native.
 
 TODO: Migrate state merging logic from LLM prompt to native Python code
 -----------------------------------------------------------------------------
