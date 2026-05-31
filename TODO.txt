@@ -12,6 +12,7 @@ TODO: Migrate state merging logic from LLM prompt to native Python code
 [ ] Refactor engine/compression.py to have the LLM return ONLY fresh updates or newly extracted facts instead of the entire mutated JSON tree.
 [ ] Implement a native Python deep-merge utility (e.g., recursive dict update) to stitch current database records together with the incoming LLM payload.
 [ ] Streamline the system prompt in engine/compression.py by removing macro inheritance mandates, cutting prompt token overhead and completely eliminating the risk of small-model sub-key pruning.
+[ ] Add validation/soft-delete safety check to database/queries.py (`update_adaptive_knowledge`) to ensure a category key isn't dropped if the incoming text block simply didn't touch on that domain or if the model response was truncated.
 
 TODO: Optimize Context Ingestion, Token Density, and Multi-Type Parsing Handlers
 ---------------------------------------------------------------------------------
@@ -23,6 +24,7 @@ TODO: Optimize Context Ingestion, Token Density, and Multi-Type Parsing Handlers
     - MD Parser: Specialized check for markdown headers and code fence block skips.
     - TXT Parser: Lightweight, lightning-fast regex splitting without code fence tracking overhead.
     - PDF Parser: Sanitize line fragmentation caused by page extraction coordinates before token split validation.
+[ ] Update `parse_lm_studio_file` regex in engine/parser.py to evaluate markdown code block fences properly, ensuring literal string examples of `<think>` inside code blocks are ignored and not purged.
 
 TODO: Robustness, Memory Safety & Parsing Recovery Trackers
 ---------------------------------------------------------------------------------
@@ -32,3 +34,5 @@ TODO: Robustness, Memory Safety & Parsing Recovery Trackers
 [ ] Implement Multi-Threaded Thread Safety & QThread Lifecycle Protections:
     - Audit background workflow lifecycles inside gui/main_window.py.
     - Standardize thread shutdown routes to explicitly enforce the Quit-Wait execution pattern (worker.quit() followed by worker.wait()) to eliminate testing/production resource leaks.
+[ ] Update engine initialization in database/connection.py to include a busy timeout configuration (`connect_args={"check_same_thread": False, "timeout": 30}`) to mitigate multi-threaded `OperationalError: database is locked` write contentions during simultaneous background operations.
+[ ] Update worker spawning loop in gui/main_window.py to explicitly connect the worker thread's `finished` signal to its own `deleteLater` slot, ensuring safe object deletion upon pipeline completion.
