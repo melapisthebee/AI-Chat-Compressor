@@ -6,18 +6,15 @@ from pypdf import PdfReader
 def _extract_text_from_pdf(filepath: str) -> str:
     """
     Extracts raw text strings across all pages of a PDF file.
-    Includes De-fragmentation: Fixes arbitrary mid-sentence newlines caused 
-    by coordinate-based PDF text extraction while preserving true paragraphs.
+    Reverted to safe line-by-line extraction to prevent skewed paragraph line-count ratios.
     """
     reader = PdfReader(filepath)
     text_content = []
     for page in reader.pages:
         extracted = page.extract_text()
         if extracted:
-            # Replace single newlines with spaces, but leave double newlines intact
-            cleaned = re.sub(r'(?<!\n)\n(?!\n)', ' ', extracted)
-            text_content.append(cleaned.strip())
-    return "\n\n".join(text_content)
+            text_content.append(extracted)
+    return "\n".join(text_content)
 
 def _mask_credentials(text: str) -> str:
     """
@@ -46,8 +43,9 @@ def _clean_and_truncate_content(content: str, max_lines: int = 15) -> str:
 
     is_tool_block = any(tag in content for tag in ["<tool_call>", "<tool_response>", "<function=", "jsonrpc"])
     
-    # Flag as data dump if > 50% of lines look like hex hashes or file paths
-    hex_or_path_lines = [l for l in lines if re.search(r'(^[a-fA-F0-9_-]{12,})|(\\|\/)', l)]
+    path_regex = r'(^[a-fA-F0-9_-]{12,})|([A-Za-z]:\\[\w\.-]+\\[\w\.-]+)|(\/[\w\.-]+\/[\w\.-]+)'
+    hex_or_path_lines = [l for l in lines if re.search(path_regex, l)]
+    
     is_data_dump = len(hex_or_path_lines) / len(lines) > 0.5
 
     if is_tool_block or is_data_dump:
