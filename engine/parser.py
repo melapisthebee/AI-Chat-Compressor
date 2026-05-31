@@ -4,10 +4,7 @@ from typing import List, Dict
 from pypdf import PdfReader
 
 def _extract_text_from_pdf(filepath: str) -> str:
-    """
-    Extracts raw text strings across all pages of a PDF file.
-    Reverted to safe line-by-line extraction to prevent skewed paragraph line-count ratios.
-    """
+    """Extracts raw text strings across all pages of a PDF file."""
     reader = PdfReader(filepath)
     text_content = []
     for page in reader.pages:
@@ -17,10 +14,7 @@ def _extract_text_from_pdf(filepath: str) -> str:
     return "\n".join(text_content)
 
 def _mask_credentials(text: str) -> str:
-    """
-    Detects and redacts sensitive API keys, authorization tokens, 
-    and Tailscale/Local networking IP patterns from text contexts.
-    """
+    """Detects and redacts sensitive API keys, tokens, and IP patterns."""
     text = re.sub(
         r'((?:api[-_]?key|token|secret|password|pass|sk[-_]lm)\s*[:=]\s*["\']?)[a-zA-Z0-9_\-:]+(["\']?)', 
         r'\1[REDACTED_SECRET]\2', 
@@ -31,21 +25,26 @@ def _mask_credentials(text: str) -> str:
     text = re.sub(r'\b10\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', '[REDACTED_INTRANET_IP]', text)
     return text
 
-def _clean_and_truncate_content(content: str, max_lines: int = 15) -> str:
+def _clean_and_truncate_content(content: str, max_lines: int = 15, skip_truncation: bool = False) -> str:
     """
-    Detects massive automated tool results, terminal dumps, or file arrays 
-    and truncates them to protect the model from context contamination.
+    Detects massive automated tool results and truncates them,
+    unless skip_truncation is True (for full documents).
     """
+    # Always mask credentials regardless of truncation setting
     content = _mask_credentials(content)
+    
+    # If this is a full file pipeline (PDF/TXT), skip truncation
+    if skip_truncation:
+        return content
+
+    # Otherwise, apply existing truncation logic
     lines = content.splitlines()
     if len(lines) <= max_lines:
         return content
 
     is_tool_block = any(tag in content for tag in ["<tool_call>", "<tool_response>", "<function=", "jsonrpc"])
-    
     path_regex = r'(^[a-fA-F0-9_-]{12,})|([A-Za-z]:\\[\w\.-]+\\[\w\.-]+)|(\/[\w\.-]+\/[\w\.-]+)'
     hex_or_path_lines = [l for l in lines if re.search(path_regex, l)]
-    
     is_data_dump = len(hex_or_path_lines) / len(lines) > 0.5
 
     if is_tool_block or is_data_dump:
@@ -56,31 +55,20 @@ def _clean_and_truncate_content(content: str, max_lines: int = 15) -> str:
     return content
 
 def _strip_thought_blocks_safely(text: str) -> str:
-    """
-    Removes <think> loops globally, BUT safely ignores them if they are 
-    written inside Markdown ``` code block fences.
-    """
     code_blocks = []
-    
-    # 1. Mask code blocks by replacing them with temporary placeholder tokens
     def preserve_code(match):
         code_blocks.append(match.group(0))
         return f"__CODE_BLOCK_PLACEHOLDER_{len(code_blocks)-1}__"
 
     temp_text = re.sub(r'```[\s\S]*?```', preserve_code, text)
-
-    # 2. Execute the thought tag purge safely on the remaining open text
     temp_text = re.sub(r'<(think|thinking|thought)>[\s\S]*?</\1>', '', temp_text, flags=re.IGNORECASE)
     temp_text = re.sub(r'\[(think|thinking|thought)\][\s\S]*?\[/\1\]', '', temp_text, flags=re.IGNORECASE)
 
-    # 3. Restore the intact code blocks back into their original positions
     for i, block in enumerate(code_blocks):
         temp_text = temp_text.replace(f"__CODE_BLOCK_PLACEHOLDER_{i}__", block)
-
     return temp_text
 
 def _parse_json_pipeline(filepath: str) -> List[Dict[str, str]]:
-    """Independent parsing handler for structured JSON chat logs."""
     import json
     with open(filepath, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -91,24 +79,21 @@ def _parse_json_pipeline(filepath: str) -> List[Dict[str, str]]:
         if m:
             role = str(m.get("role", "user")).lower()
             content = str(m.get("content", ""))
-            
             content = _strip_thought_blocks_safely(content)
-            content = _clean_and_truncate_content(content)
+            # JSON logs should still be truncated per message if they are huge logs
+            content = _clean_and_truncate_content(content, skip_truncation=False)
             
             if content.strip():
                 normalized_messages.append({"role": role, "content": content.strip()})
     return normalized_messages
 
-def _parse_plaintext_pipeline(raw_text: str) -> List[Dict[str, str]]:
-    """Independent parsing handler for unstructured TXT, MD, and PDF payloads."""
+def _parse_plaintext_pipeline(raw_text: str, skip_truncation: bool = False) -> List[Dict[str, str]]:
     raw_text = _strip_thought_blocks_safely(raw_text)
 
     if not raw_text.strip():
         return [{"role": "user", "content": "Initial workspace handshake segment analyzed."}]
 
-    # Find boundaries to prevent triggering "User:" roles inside of a code string
     code_block_spans = [m.span() for m in re.finditer(r'```[\s\S]*?```', raw_text)]
-
     pattern = re.compile(r'(?mi)^(###\s+)?(user|assistant|ai|system|human|bot):\s*')
     all_matches = list(pattern.finditer(raw_text))
     
@@ -119,9 +104,8 @@ def _parse_plaintext_pipeline(raw_text: str) -> List[Dict[str, str]]:
         if not in_code:
             matches.append(m)
 
-    # If no explicit conversational tags are found, treat the whole file as a user dump
     if not matches:
-        return [{"role": "user", "content": _clean_and_truncate_content(raw_text.strip())}]
+        return [{"role": "user", "content": _clean_and_truncate_content(raw_text.strip(), skip_truncation=skip_truncation)}]
 
     cleaned_messages = []
     for i in range(len(matches)):
@@ -133,7 +117,8 @@ def _parse_plaintext_pipeline(raw_text: str) -> List[Dict[str, str]]:
         elif role in ('ai', 'bot', 'assistant'): role = 'assistant'
             
         content = raw_text[start_idx:end_idx].strip()
-        content = _clean_and_truncate_content(content)
+        # Pass the skip_truncation flag down
+        content = _clean_and_truncate_content(content, skip_truncation=skip_truncation)
         
         if content:
             cleaned_messages.append({"role": role, "content": content})
@@ -144,9 +129,6 @@ def _parse_plaintext_pipeline(raw_text: str) -> List[Dict[str, str]]:
     return cleaned_messages
 
 def parse_lm_studio_file(filepath: str) -> List[Dict[str, str]]:
-    """
-    Main Dispatcher: Routes files to their respective extension parsing pipelines.
-    """
     ext = os.path.splitext(filepath)[1].lower()
 
     if ext == '.json':
@@ -155,11 +137,11 @@ def parse_lm_studio_file(filepath: str) -> List[Dict[str, str]]:
     elif ext in ('.txt', '.md'):
         with open(filepath, 'r', encoding='utf-8') as f:
             raw_text = f.read()
-        return _parse_plaintext_pipeline(raw_text)
+        return _parse_plaintext_pipeline(raw_text, skip_truncation=True)
 
     elif ext == '.pdf':
         raw_text = _extract_text_from_pdf(filepath)
-        return _parse_plaintext_pipeline(raw_text)
+        return _parse_plaintext_pipeline(raw_text, skip_truncation=True)
         
     else:
         raise ValueError(f"Unsupported file format: {ext}")
