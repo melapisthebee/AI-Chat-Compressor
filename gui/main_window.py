@@ -307,7 +307,7 @@ class MainWindow(QMainWindow):
             self.blink_timer.stop()
         elif state in ("CRITICAL", "DB_ERROR"):
             self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #f44336;")  # Red base
-            self.blink_timer.start(500)  # Blink every 500ms
+            self.blink_timer.start(125)  # Blink every 125ms
 
     def toggle_blink_indicator(self):
         """
@@ -329,11 +329,14 @@ class MainWindow(QMainWindow):
         Placeholder settings dialog - functionality to be implemented.
         Currently shows a modal with placeholder content.
         """
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QIcon
+        
         msg = QMessageBox()
         msg.setWindowTitle("Settings (Coming Soon)")
-        msg.setIcon(QMessageBox.Information)
+        msg.setIcon(QMessageBox.Icon.Information)  # Fixed for PyQt6
         msg.setText("⚙️ Settings Panel\n\nThis feature is under development.\n\nPlanned features:\n• API Configuration\n• Token Budget Settings\n• Compression Model Selection\n• Database Management")
-        msg.setStandardButtons(QMessageBox.Ok)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)  # Fixed for PyQt6
         msg.exec()
 
     def closeEvent(self, event):

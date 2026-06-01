@@ -61,7 +61,9 @@ It's quick because it's easy.
 
 
 &#x09;Verify with `python -m pip --version` :
-Should output something like `pip 26.1.1 from C:\\\\\\\\Python314\\\\\\\\Lib\\\\\\\\site-packages\\\\\\\\pip (python 3.14)`
+Should output something like `pip 26.1.1 from C:\\Python314\\Lib\\site-packages\\pip (python 3.14)`
+
+If python is not installed, you can download it at `https://www.python.org/downloads/`, then verify the installation using the `pip` command above. 
 
 
 
@@ -91,15 +93,13 @@ Should output something like `pip 26.1.1 from C:\\\\\\\\Python314\\\\\\\\Lib\\\\
 
 
 
-4: Fill the `.env` file in the program's root directory with your LM Studio URL, API Token, and Model of choice. 
+4: Fill the `.env` file in the program's root directory with your LM Studio URL, API Token, and Model of choice.
 
 
 
 
 
-5: Run the project and hope it boots.
-
-&#x09;In the project root, run "python app.py"
+5: Launch
 
 
 
@@ -157,5 +157,5 @@ If AI is used to add feature and/or fix issues,
 
 =============\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_=============
 
-&#x09;      Edited: 05/30/2026
+&#x09;      Edited: 05/31/2026
 

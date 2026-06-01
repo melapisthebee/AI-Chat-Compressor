@@ -1,4 +1,3 @@
-    Wrap JSON parsing in try/except blocks in engine/parser.py:_parse_json_pipeline()
  Add timeout configuration to LLM API calls (suggested: 60 seconds)
  Implement retry mechanism for transient network failures
  Create user-friendly error dialogs instead of generic crash messages
@@ -30,13 +29,13 @@
   Add configuration toggle for truncation aggressiveness
 
 
- 7. JSON Recovery Enhancement
-  Integrate json-repair or similar library instead of custom regex cleanup
-  Implement progressive recovery strategies:
- Try exact parse
- Try with thought tag removal
- Try character-level repair
- Fallback to empty delta (preserve existing state)
+        7. JSON Recovery Enhancement
+        Integrate json-repair or similar library instead of custom regex cleanup
+        Implement progressive recovery strategies:
+        Try exact parse
+        Try with thought tag removal
+        Try character-level repair
+        Fallback to empty delta (preserve existing state)
 
 
  8. UI/UX Improvements
