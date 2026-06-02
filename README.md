@@ -1,4 +1,4 @@
-=============START=============
+\## START
 
 
 
@@ -30,7 +30,7 @@ These json files, which we will refer to as "projects" from this moment forward,
 
 
 
-============WARNING============
+\#### WARNING
 
 
 
@@ -50,9 +50,9 @@ The developer(s), contributor(s), maintainer(s), owner(s), and hosting service(s
 
 
 
-============QUICK START============
+\## QUICK START
 
-It's quick because it's easy.
+\#### It's quick because it's easy.
 
 
 
@@ -61,9 +61,9 @@ It's quick because it's easy.
 
 
 &#x09;Verify with `python -m pip --version` :
-Should output something like `pip 26.1.1 from C:\\Python314\\Lib\\site-packages\\pip (python 3.14)`
+Should output something like `pip 26.1.1 from C:\\\\Python314\\\\Lib\\\\site-packages\\\\pip (python 3.14)`
 
-If python is not installed, you can download it at `https://www.python.org/downloads/`, then verify the installation using the `pip` command above. 
+If python is not installed, you can download it at `https://www.python.org/downloads/`, then verify the installation using the `pip` command above.
 
 
 

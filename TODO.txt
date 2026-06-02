@@ -29,15 +29,6 @@
   Add configuration toggle for truncation aggressiveness
 
 
-        7. JSON Recovery Enhancement
-        Integrate json-repair or similar library instead of custom regex cleanup
-        Implement progressive recovery strategies:
-        Try exact parse
-        Try with thought tag removal
-        Try character-level repair
-        Fallback to empty delta (preserve existing state)
-
-
  8. UI/UX Improvements
   Add progress bar for long-running compression operations
   Create status indicator showing: Idle → Parsing → Compression → Audit → Complete/Error
