@@ -1,13 +1,15 @@
 import os
 import json
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QTextEdit, QPushButton, QMessageBox, QApplication)
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QTextEdit, QPushButton, QMessageBox, QApplication, QFrame)
+from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
+from PyQt6.QtGui import QFont
 
 from database.connection import SessionLocal, init_db
 from database.queries import get_or_create_project, list_all_projects, get_project_knowledge
 from database.models import Project
 from engine.parser import parse_lm_studio_file
 from engine.compression import CompressionEngine
+
 
 class CompressionWorker(QThread):
     """
@@ -55,6 +57,15 @@ class MainWindow(QMainWindow):
         # Initialize SQLite structure on launch
         init_db()
         
+        # State management for visual indicator
+        self.current_state = "IDLE"  # IDLE, RUNNING, SUCCESS, WARNING, CRITICAL, DB_ERROR
+        self.blink_timer = QTimer(self)
+        self.blink_timer.timeout.connect(self.toggle_blink_indicator)
+        self.blink_visible = True
+        
+        # Settings action flag
+        self.settings_opened = False
+        
         # Core Dark Theme Base Stylesheet
         self.setStyleSheet("""
             QMainWindow { background-color: #121212; }
@@ -85,17 +96,34 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         
-        # Project Selector Field Row (Upgraded to Editable QComboBox)
+        # Project Selector Field Row (Upgraded to Editable QComboBox with visual indicators)
         proj_layout = QHBoxLayout()
-        proj_label = QLabel("Active Target Project Profile:")
-        proj_label.setStyleSheet("font-weight: bold;")
         
+        # Visual Status Indicator Dot
+        self.status_indicator = QFrame()
+        self.status_indicator.setFixedSize(12, 12)
+        self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")
+        proj_layout.addWidget(self.status_indicator)
+        
+        # Settings Button (Placeholder)
+        settings_btn = QPushButton("⚙️")
+        settings_btn.setFixedSize(24, 24)
+        settings_btn.setToolTip("Settings (Coming Soon)")
+        settings_btn.clicked.connect(self.open_settings_placeholder)
+        proj_layout.addWidget(settings_btn)
+        
+        # Project Label
+        proj_label = QLabel("Active Target Project Profile:")
+        proj_label.setStyleSheet("font-weight: bold; margin-left: 8px;")
+        proj_layout.addWidget(proj_label)
+        
+        # Shortened Project Input (20% smaller than default)
         self.project_input = QComboBox()
         self.project_input.setEditable(True)
         self.project_input.setPlaceholderText("Select or type a project name...")
-        
-        proj_layout.addWidget(proj_label)
+        self.project_input.setMinimumWidth(200)  # Reduced width
         proj_layout.addWidget(self.project_input)
+        
         main_layout.addLayout(proj_layout)
         
         # Drag and Drop zone instance
@@ -128,6 +156,7 @@ class MainWindow(QMainWindow):
         
         # Hydrate existing entries on boot
         self.refresh_project_dropdown()
+
 
     def refresh_project_dropdown(self):
         """Queries the database to hydrate the combobox profile selectors."""
@@ -177,22 +206,51 @@ class MainWindow(QMainWindow):
         self.project_input.setEnabled(False)
         self.copy_btn.setEnabled(False)
         
+        # Set running indicator (blinking green)
+        self.set_status_indicator("RUNNING")
+        
         # Spawn the processing lifecycle thread
         self.worker = CompressionWorker(project_name, filepath)
         self.worker.progress_signal.connect(self.update_status)
         self.worker.error_signal.connect(self.handle_worker_error)
         self.worker.finished_signal.connect(self.handle_worker_success)
+        
+        # MEMORY LEAK PREVENTION: Force C++ QThread object cleanup natively upon completion
+        self.worker.finished.connect(self.worker.deleteLater)
+        
         self.worker.start()
 
     def update_status(self, text: str):
         self.console_output.append(f"⚙️ {text}")
 
     def handle_worker_error(self, err_message: str):
+        """
+        Handles pipeline errors with smart notification logic.
+        - Non-critical errors: console output + status bar message
+        - Critical errors: console output + modal popup + red indicator
+        """
         self.console_output.append(f"\n❌ CRITICAL CRASH IN PIPELINE LOOP:\n{err_message}\n")
+        
+        # Determine error severity and show appropriate UI feedback
+        critical_keywords = ["database", "permission denied", "connection failed",
+                           "api error", "timeout exceeded", "out of memory"]
+        is_critical = any(keyword in err_message.lower() for keyword in critical_keywords)
+        
+        if is_critical:
+            # Critical: Show popup + red blinking indicator
+            self.set_status_indicator("CRITICAL")
+            QMessageBox.critical(self, "Pipeline Error Encountered", f"Critical error:\n{err_message}")
+        else:
+            # Non-critical: Status bar message + yellow warning indicator
+            self.set_status_indicator("WARNING")
+            self.statusBar().showMessage(f"Warning: {err_message[:80]}", 5000)
+        
         self.reset_ui_controls()
-        QMessageBox.critical(self, "Pipeline Error Encountered", f"An execution boundary error occurred:\n{err_message}")
 
     def handle_worker_success(self, final_knowledge: dict, project_name: str):
+        # Set success indicator
+        self.set_status_indicator("SUCCESS")
+        
         self.console_output.clear()
         self.console_output.append(f"✅ SUCCESSFUL UPDATE STRATIFICATION FOR PROJECT: {project_name}\n")
         self.console_output.append("--- UPDATED ADAPTIVE KNOWLEDGE CORE STATE ---")
@@ -209,6 +267,8 @@ class MainWindow(QMainWindow):
         self.drop_zone.setAcceptDrops(True)
         self.project_input.setEnabled(True)
         self.copy_btn.setEnabled(True)
+        # Return to idle state
+        self.set_status_indicator("IDLE")
     
     def copy_state_to_clipboard(self):
         """Copies the current adaptive knowledge text to the system clipboard."""
@@ -220,3 +280,73 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Context state copied to clipboard!", 3000)
         else:
             QMessageBox.warning(self, "Copy Failed", "The output area is currently empty.")
+    
+    def set_status_indicator(self, state):
+        """
+        Updates the visual status indicator dot based on application state.
+        States: IDLE (solid green), RUNNING (blinking green), SUCCESS (solid green),
+                WARNING (solid yellow), CRITICAL (blinking red), DB_ERROR (blinking red)
+        """
+        self.current_state = state
+        
+        # Stop any existing timer first
+        if self.blink_timer.isActive():
+            self.blink_timer.stop()
+        
+        # Determine color and blinking behavior based on state
+        if state == "IDLE":
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")  # Solid green
+        elif state == "RUNNING":
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")  # Green base
+            self.blink_timer.start(500)  # Blink every 500ms
+        elif state == "SUCCESS":
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")  # Solid green
+            self.blink_timer.stop()
+        elif state == "WARNING":
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #ff9800;")  # Orange/Yellow
+            self.blink_timer.stop()
+        elif state in ("CRITICAL", "DB_ERROR"):
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #f44336;")  # Red base
+            self.blink_timer.start(125)  # Blink every 125ms
+
+    def toggle_blink_indicator(self):
+        """
+        Toggles the status indicator visibility for blinking effect.
+        Used to signal active processing or critical error states.
+        """
+        self.blink_visible = not self.blink_visible
+        if self.current_state == "RUNNING":
+            color = "#4caf50" if self.blink_visible else "#1e3a1e"  # Green to dark green
+        elif self.current_state in ("CRITICAL", "DB_ERROR"):
+            color = "#f44336" if self.blink_visible else "#8b0000"  # Red to dark red
+        else:
+            return
+        
+        self.status_indicator.setStyleSheet(f"border-radius: 6px; background-color: {color};")
+
+    def open_settings_placeholder(self):
+        """
+        Placeholder settings dialog - functionality to be implemented.
+        Currently shows a modal with placeholder content.
+        """
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QIcon
+        
+        msg = QMessageBox()
+        msg.setWindowTitle("Settings (Coming Soon)")
+        msg.setIcon(QMessageBox.Icon.Information)  # Fixed for PyQt6
+        msg.setText("⚙️ Settings Panel\n\nThis feature is under development.\n\nPlanned features:\n• API Configuration\n• Token Budget Settings\n• Compression Model Selection\n• Database Management")
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)  # Fixed for PyQt6
+        msg.exec()
+
+    def closeEvent(self, event):
+        """
+        Safely captures application shutdown attempts and forces the background worker 
+        through the explicit Quit-Wait lifecycle execution pattern to prevent 
+        'Destroyed while thread is still running' underlying C++ exceptions.
+        """
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.console_output.append("\n⚠️ System shutting down: Halting background background generation loop...")
+            self.worker.quit()
+            self.worker.wait()
+        event.accept()

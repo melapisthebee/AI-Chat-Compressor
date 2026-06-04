@@ -1,3 +1,4 @@
+import threading
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from config.settings import settings
@@ -8,8 +9,11 @@ DATABASE_URL = f"sqlite:///{settings.DATABASE_PATH}"
 
 engine = create_engine(
     DATABASE_URL, 
-    connect_args={"check_same_thread": False}  # Crucial for multi-threaded GUI setups
+    connect_args={"check_same_thread": False, "timeout": 30}  # Crucial for multi-threaded GUI setups with timeout protection
 )
+
+# Global mutex for thread-safe database write operations
+db_write_lock = threading.Lock()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
