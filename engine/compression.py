@@ -1,7 +1,8 @@
 import json
 import re
+import time
 from typing import List, Dict, Any, Optional
-from openai import OpenAI
+from openai import OpenAI, APIConnectionError, APITimeoutError, RateLimitError
 from sqlalchemy.orm import Session as DBSession
 
 try:
@@ -23,8 +24,50 @@ class CompressionEngine:
         """
         self.client = OpenAI(
             base_url=settings.LM_STUDIO_BASE_URL,
-            api_key=settings.LM_STUDIO_API_KEY
+            api_key=settings.LM_STUDIO_API_KEY,
+            timeout=settings.REQUEST_TIMEOUT
         )
+
+    def _call_llm_with_retry(self, call_func, *args, **kwargs):
+        """
+        Wrapper method that implements retry logic for LLM API calls.
+        Retries on transient failures (connection errors, timeouts, rate limits) 
+        with exponential backoff.
+        
+        Args:
+            call_func: The function to call (e.g., self.client.chat.completions.create)
+            *args, **kwargs: Arguments to pass to the function
+            
+        Returns:
+            The response from the API call
+            
+        Raises:
+            Exception: Re-raises the last exception if all retries are exhausted
+        """
+        max_retries = settings.MAX_RETRIES
+        base_delay = settings.RETRY_BASE_DELAY
+        last_exception = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                return call_func(*args, **kwargs)
+            except (APIConnectionError, APITimeoutError, RateLimitError) as e:
+                last_exception = e
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"⚠️ Transient failure detected (attempt {attempt + 1}/{max_retries + 1}): {str(e)}")
+                    print(f"🔄 Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                else:
+                    print(f"❌ All {max_retries + 1} attempts failed. Last error: {str(e)}")
+                    raise
+            except Exception as e:
+                # Non-transient errors, don't retry
+                print(f"❌ Non-retryable error: {str(e)}")
+                raise
+        
+        # Should never reach here, but just in case
+        raise last_exception
 
     def _deep_merge(self, base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -80,14 +123,15 @@ class CompressionEngine:
         }
 
         try:
-            response = self.client.chat.completions.create(
+            response = self._call_llm_with_retry(
+                self.client.chat.completions.create,
                 model=settings.DEFAULT_COMPRESSION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": json.dumps(user_payload, indent=2)}
                 ],
                 temperature=0.0,
-                response_format={"type": "text"} 
+                response_format={"type": "text"}
             )
             
             raw_content = response.choices[0].message.content.strip()
@@ -176,7 +220,8 @@ class CompressionEngine:
         }
 
         try:
-            response = self.client.chat.completions.create(
+            response = self._call_llm_with_retry(
+                self.client.chat.completions.create,
                 model=settings.DEFAULT_COMPRESSION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},

@@ -201,6 +201,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Missing Project Marker", "Please provide a target project name before adding raw session data.")
             return
             
+        # Store filepath for potential retry
+        self.pending_filepath = filepath
+        
         # Lock UI inputs to prevent collision modifications during generation
         self.drop_zone.setAcceptDrops(False)
         self.project_input.setEnabled(False)
@@ -225,11 +228,11 @@ class MainWindow(QMainWindow):
 
     def handle_worker_error(self, err_message: str):
         """
-        Handles pipeline errors with smart notification logic.
+        Handles pipeline errors with user-friendly notification logic.
         - Non-critical errors: console output + status bar message
-        - Critical errors: console output + modal popup + red indicator
+        - Critical errors: console output + helpful modal popup with retry option
         """
-        self.console_output.append(f"\n❌ CRITICAL CRASH IN PIPELINE LOOP:\n{err_message}\n")
+        self.console_output.append(f"\n⚠️ Processing Interrupted:\n{err_message}\n")
         
         # Determine error severity and show appropriate UI feedback
         critical_keywords = ["database", "permission denied", "connection failed",
@@ -237,15 +240,84 @@ class MainWindow(QMainWindow):
         is_critical = any(keyword in err_message.lower() for keyword in critical_keywords)
         
         if is_critical:
-            # Critical: Show popup + red blinking indicator
+            # Critical: Show helpful popup with retry option + red blinking indicator
             self.set_status_indicator("CRITICAL")
-            QMessageBox.critical(self, "Pipeline Error Encountered", f"Critical error:\n{err_message}")
+            
+            # Create a user-friendly error message
+            friendly_message = self._get_friendly_error_message(err_message)
+            
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("⚠️ Processing Interrupted")
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setText(friendly_message)
+            
+            # Add Retry and Close buttons
+            retry_button = msg_box.addButton("Retry", QMessageBox.ButtonRole.AcceptRole)
+            close_button = msg_box.addButton("Close", QMessageBox.ButtonRole.RejectRole)
+            msg_box.exec()
+            
+            # Check which button was clicked
+            if msg_box.clickedButton() == retry_button:
+                # User wants to retry - reset UI and restart
+                self.console_output.append("\n🔄 Retrying operation...")
+                self.reset_ui_controls()
+                # Re-trigger the file processing if possible
+                if hasattr(self, 'pending_filepath'):
+                    self.handle_incoming_file(self.pending_filepath)
+            else:
+                # User chose to close - just reset UI
+                self.reset_ui_controls()
         else:
             # Non-critical: Status bar message + yellow warning indicator
             self.set_status_indicator("WARNING")
             self.statusBar().showMessage(f"Warning: {err_message[:80]}", 5000)
+            self.reset_ui_controls()
+    
+    def _get_friendly_error_message(self, err_message: str) -> str:
+        """
+        Converts technical error messages into user-friendly guidance.
         
-        self.reset_ui_controls()
+        Args:
+            err_message: The raw error message from the pipeline
+            
+        Returns:
+            A user-friendly error description with actionable guidance
+        """
+        err_lower = err_message.lower()
+        
+        if "connection failed" in err_lower or "lm studio" in err_lower:
+            return ("Unable to connect to LM Studio.\n\n"
+                    "Please check:\n"
+                    "• LM Studio is running\n"
+                    "• The correct model is loaded\n"
+                    "• Server address matches settings (default: localhost:1234)\n\n"
+                    "After fixing, click 'Retry' to continue.")
+        elif "timeout" in err_lower:
+            return ("The request took too long to complete.\n\n"
+                    "This can happen if:\n"
+                    "• The conversation is very long\n"
+                    "• LM Studio is processing slowly\n"
+                    "• Network issues occurred\n\n"
+                    "Please try again, or consider using a smaller file.")
+        elif "database" in err_lower:
+            return ("Database access error.\n\n"
+                    "Please check:\n"
+                    "• The database file is not corrupted\n"
+                    "• You have write permissions to the storage folder\n\n"
+                    "If the problem persists, try restarting the application.")
+        elif "permission denied" in err_lower:
+            return ("Access denied.\n\n"
+                    "Please check:\n"
+                    "• The file is not open in another program\n"
+                    "• You have permissions to access the file\n\n"
+                    "Try selecting a different file or restarting the app.")
+        else:
+            # Generic friendly message
+            return ("An unexpected error occurred during processing.\n\n"
+                    f"Error details: {err_message[:200]}\n\n"
+                    "Please try again. If the problem persists, "
+                    "consider restarting the application or "
+                    "contacting support.")
 
     def handle_worker_success(self, final_knowledge: dict, project_name: str):
         # Set success indicator
