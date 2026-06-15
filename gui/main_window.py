@@ -1,14 +1,17 @@
 import os
 import json
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QTextEdit, QPushButton, QMessageBox, QApplication, QFrame)
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QTextEdit, QPushButton, QMessageBox, QApplication, QFrame, QTabWidget, QScrollArea)
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QFont
 
 from database.connection import SessionLocal, init_db
 from database.queries import get_or_create_project, list_all_projects, get_project_knowledge
 from database.models import Project
-from engine.parser import parse_lm_studio_file
 from engine.compression import CompressionEngine
+from gui.components.token_dashboard import TokenDashboardWidget, TokenBudgetSettingsWidget
+
+# Import parser function
+from engine.parser import parse_lm_studio_file
 
 
 class CompressionWorker(QThread):
@@ -17,7 +20,7 @@ class CompressionWorker(QThread):
     without freezing the GUI interface thread.
     """
     progress_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal(dict, str)
+    finished_signal = pyqtSignal(dict, str, dict)  # knowledge, project_name, dashboard_data
     error_signal = pyqtSignal(str)
 
     def __init__(self, project_name: str, filepath: str):
@@ -38,10 +41,18 @@ class CompressionWorker(QThread):
             self.progress_signal.emit("Running sliding token window synchronization loop through local LLM...")
             engine = CompressionEngine()
             
-            # Runs the dynamic context synchronization
-            updated_knowledge = engine.process_and_adapt(db, project.id, messages, filename)
+            # Runs the dynamic context synchronization with streaming support
+            result = engine.process_and_adapt(db, project.id, messages, filename)
             
-            self.finished_signal.emit(updated_knowledge, self.project_name)
+            # Handle both old and new return formats
+            if isinstance(result, dict):
+                updated_knowledge = result.get('knowledge', result)
+                dashboard_data = result.get('dashboard_data', {})
+            else:
+                updated_knowledge = result
+                dashboard_data = {}
+            
+            self.finished_signal.emit(updated_knowledge, self.project_name, dashboard_data)
         except Exception as e:
             self.error_signal.emit(str(e))
         finally:
@@ -52,7 +63,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Adaptive Conversation Sync Engine")
-        self.resize(800, 600)
+        self.resize(1200, 800)
         
         # Initialize SQLite structure on launch
         init_db()
@@ -63,8 +74,8 @@ class MainWindow(QMainWindow):
         self.blink_timer.timeout.connect(self.toggle_blink_indicator)
         self.blink_visible = True
         
-        # Settings action flag
-        self.settings_opened = False
+        # Store current project stats for dashboard
+        self.current_project_stats = {}
         
         # Core Dark Theme Base Stylesheet
         self.setStyleSheet("""
@@ -105,11 +116,11 @@ class MainWindow(QMainWindow):
         self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")
         proj_layout.addWidget(self.status_indicator)
         
-        # Settings Button (Placeholder)
-        settings_btn = QPushButton("⚙️")
-        settings_btn.setFixedSize(24, 24)
-        settings_btn.setToolTip("Settings (Coming Soon)")
-        settings_btn.clicked.connect(self.open_settings_placeholder)
+        # Settings Button
+        settings_btn = QPushButton("⚙️ Settings")
+        settings_btn.setFixedWidth(80)
+        settings_btn.setToolTip("Configure Token Budget Settings")
+        settings_btn.clicked.connect(self.open_settings_dialog)
         proj_layout.addWidget(settings_btn)
         
         # Project Label
@@ -126,13 +137,23 @@ class MainWindow(QMainWindow):
         
         main_layout.addLayout(proj_layout)
         
+        # Tab Widget for Dashboard and Console
+        self.tab_widget = QTabWidget()
+        
+        # Tab 1: Console Output
+        console_scroll = QScrollArea()
+        console_scroll.setWidgetResizable(True)
+        console_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        console_scroll_content = QWidget()
+        console_layout = QVBoxLayout(console_scroll_content)
+        
         # Drag and Drop zone instance
         from gui.components.drop_zone import DropZone
         self.drop_zone = DropZone()
         self.drop_zone.file_dropped.connect(self.handle_incoming_file)
-        main_layout.addWidget(self.drop_zone, stretch=2)
+        console_layout.addWidget(self.drop_zone)
         
-        # Output Logging Header Row (Pushes Copy button to the absolute right edge)
+        # Output Logging Header Row
         log_header_layout = QHBoxLayout()
         log_label = QLabel("System Output / Current Project State Blueprint:")
         self.copy_btn = QPushButton("Copy Context State", self)
@@ -140,14 +161,27 @@ class MainWindow(QMainWindow):
         self.copy_btn.clicked.connect(self.copy_state_to_clipboard)
         
         log_header_layout.addWidget(log_label)
-        log_header_layout.addStretch()  # Acts as an expanding spring row divider
+        log_header_layout.addStretch()
         log_header_layout.addWidget(self.copy_btn)
-        main_layout.addLayout(log_header_layout)
+        console_layout.addLayout(log_header_layout)
         
         # Console Display Text Frame
         self.console_output = QTextEdit()
         self.console_output.setReadOnly(True)
-        main_layout.addWidget(self.console_output, stretch=3)
+        console_layout.addWidget(self.console_output, stretch=1)
+        
+        console_scroll.setWidget(console_scroll_content)
+        self.tab_widget.addTab(console_scroll, "📋 Console Output")
+        
+        # Tab 2: Token Dashboard
+        self.token_dashboard = TokenDashboardWidget()
+        self.tab_widget.addTab(self.token_dashboard, "📊 Token Dashboard")
+        
+        # Tab 3: Settings
+        self.settings_widget = TokenBudgetSettingsWidget()
+        self.tab_widget.addTab(self.settings_widget, "⚙️ Token Settings")
+        
+        main_layout.addWidget(self.tab_widget, stretch=1)
         
         self.console_output.append("System Ready. Name or select your active project area above and drag in a log file.")
 
@@ -319,7 +353,7 @@ class MainWindow(QMainWindow):
                     "consider restarting the application or "
                     "contacting support.")
 
-    def handle_worker_success(self, final_knowledge: dict, project_name: str):
+    def handle_worker_success(self, final_knowledge: dict, project_name: str, dashboard_data: dict):
         # Set success indicator
         self.set_status_indicator("SUCCESS")
         
@@ -329,6 +363,12 @@ class MainWindow(QMainWindow):
         
         pretty_json = json.dumps(final_knowledge, indent=2)
         self.console_output.append(pretty_json)
+        
+        # Update dashboard with new statistics
+        if dashboard_data:
+            self.token_dashboard.update_dashboard(project_name, dashboard_data)
+            # Store stats for this project
+            self.current_project_stats[project_name] = dashboard_data
         
         self.refresh_project_dropdown()
         self.project_input.setCurrentText(project_name)
@@ -396,20 +436,20 @@ class MainWindow(QMainWindow):
         
         self.status_indicator.setStyleSheet(f"border-radius: 6px; background-color: {color};")
 
-    def open_settings_placeholder(self):
+    def open_settings_dialog(self):
         """
-        Placeholder settings dialog - functionality to be implemented.
-        Currently shows a modal with placeholder content.
+        Open the token budget settings panel.
+        Switches to the settings tab in the main window.
         """
-        from PyQt6.QtWidgets import QMessageBox
-        from PyQt6.QtGui import QIcon
+        # Switch to settings tab
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabText(i) == "⚙️ Token Settings":
+                self.tab_widget.setCurrentIndex(i)
+                break
         
-        msg = QMessageBox()
-        msg.setWindowTitle("Settings (Coming Soon)")
-        msg.setIcon(QMessageBox.Icon.Information)  # Fixed for PyQt6
-        msg.setText("⚙️ Settings Panel\n\nThis feature is under development.\n\nPlanned features:\n• API Configuration\n• Token Budget Settings\n• Compression Model Selection\n• Database Management")
-        msg.setStandardButtons(QMessageBox.StandardButton.Ok)  # Fixed for PyQt6
-        msg.exec()
+        # Show a message that settings are available
+        self.console_output.append("\n💡 Token Budget Settings panel is now active.\n")
+        self.console_output.append("Adjust chunk sizes, overlap, and token budgets as needed.\n")
 
     def closeEvent(self, event):
         """

@@ -1,5 +1,11 @@
 from engine.tokenizer import tracker
-from engine.parser import parse_lm_studio_file
 from engine.compression import CompressionEngine
+from engine.streaming_processor import StreamingTokenProcessor, TokenBudgetManager
 
-__all__ = ["tracker", "parse_lm_studio_file", "CompressionEngine"]
+# Lazy import for parser to avoid circular dependencies
+def get_parser():
+    """Lazy loader for parser functions to avoid circular imports."""
+    from engine.parser import parse_lm_studio_file
+    return parse_lm_studio_file
+
+__all__ = ["tracker", "CompressionEngine", "StreamingTokenProcessor", "TokenBudgetManager", "get_parser"]

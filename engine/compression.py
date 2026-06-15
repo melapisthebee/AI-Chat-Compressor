@@ -13,20 +13,26 @@ except ImportError:
 
 from config.settings import settings
 from engine.tokenizer import tracker
+from engine.streaming_processor import StreamingTokenProcessor, TokenBudgetManager
 from database.queries import get_project_knowledge, create_session_record, update_adaptive_knowledge
 
 
 class CompressionEngine:
-    def __init__(self):
+    def __init__(self, streaming_processor: Optional[StreamingTokenProcessor] = None):
         """
         Initializes the compression engine client utilizing configured environment parameters
         loaded via Pydantic Settings. Assumes a running local instance of LM Studio.
+        
+        Args:
+            streaming_processor: Optional custom streaming processor instance
         """
         self.client = OpenAI(
             base_url=settings.LM_STUDIO_BASE_URL,
             api_key=settings.LM_STUDIO_API_KEY,
             timeout=settings.REQUEST_TIMEOUT
         )
+        self.streaming_processor = streaming_processor or StreamingTokenProcessor()
+        self.token_budget_manager = TokenBudgetManager()
 
     def _call_llm_with_retry(self, call_func, *args, **kwargs):
         """
@@ -325,10 +331,12 @@ class CompressionEngine:
 
     def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str) -> Dict[str, Any]:
         """
-        Orchestrates the two-pass 'Map-Verify' pipeline:
+        Orchestrates the two-pass 'Map-Verify' pipeline with streaming support:
         1. Extract: Slices and extracts draft knowledge states.
         2. Audit: Validates draft states against source text.
         3. Commit: Updates the adaptive knowledge core.
+        
+        Uses streaming chunk processing for memory efficiency on large files.
         """
         # Load baseline
         active_knowledge = get_project_knowledge(db, project_id)
@@ -337,29 +345,52 @@ class CompressionEngine:
         total_raw_text = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in incoming_messages])
         raw_token_count = tracker.count_tokens(total_raw_text)
         
-        # Slicing logic
-        raw_tokens_list = tracker.split_into_tokens(total_raw_text)
-        chunk_size = settings.CHUNK_SIZE_TOKENS
-        token_slices = [raw_tokens_list[i:i + chunk_size] for i in range(0, len(raw_tokens_list), chunk_size)]
-        
-        # PASS 1: EXTRACTION
-        print(f"Extraction Pass: Processing {len(token_slices)} segments...")
-        for token_slice in token_slices:
-            decoded_chunk = tracker.decode_tokens(token_slice)
+        # Define chunk processing callback
+        def process_chunk_callback(chunk_data, chunk_index):
+            """Process a single chunk through the LLM pipeline."""
+            decoded_chunk = chunk_data['text']
+            
+            # PASS 1: EXTRACTION for this chunk
             delta = self._call_llm_for_knowledge_merge(active_knowledge, decoded_chunk)
             active_knowledge = self._deep_merge(active_knowledge, delta)
             
-        # PASS 2: AUDIT
-        print(f"Audit Pass: Verifying state integrity...")
-        for token_slice in token_slices:
-            decoded_chunk = tracker.decode_tokens(token_slice)
+            # PASS 2: AUDIT for this chunk
             audit_delta = self._call_llm_for_verification(active_knowledge, decoded_chunk)
             if audit_delta:
                 active_knowledge = self._deep_merge(active_knowledge, audit_delta)
-
+            
+            return {
+                'chunk_index': chunk_index,
+                'tokens_processed': chunk_data['token_count'],
+                'is_tail_chunk': chunk_data['is_tail_chunk']
+            }
+        
+        # Use streaming processor for memory-efficient processing
+        print(f"Extraction & Audit Pass: Processing with streaming chunks...")
+        print(f"Chunk size: {self.streaming_processor.chunk_size_tokens} tokens")
+        print(f"Overlap: {self.streaming_processor.overlap_tokens} tokens")
+        
+        result = self.streaming_processor.stream_process_large_file(
+            text=total_raw_text,
+            process_chunk_callback=process_chunk_callback,
+            preserve_tail=True
+        )
+        
+        # Update processing statistics
+        self.streaming_processor.update_stats(
+            raw_tokens=raw_token_count,
+            compressed_tokens=0  # Will be calculated after compression
+        )
+        
         # COMMIT
         compressed_summary_block = json.dumps(active_knowledge)
         compressed_payload_tokens = tracker.count_tokens(compressed_summary_block)
+        
+        # Update stats with final compressed count
+        self.streaming_processor.stats['total_compressed_tokens'] = compressed_payload_tokens
+        self.streaming_processor.stats['compression_ratio'] = self.streaming_processor.calculate_compression_ratio(
+            raw_token_count, compressed_payload_tokens
+        )
 
         session_record = create_session_record(
             db=db, 
@@ -377,4 +408,9 @@ class CompressionEngine:
             raw_context_stream=total_raw_text
         )
         
-        return active_knowledge
+        # Return dashboard data along with knowledge
+        return {
+            'knowledge': active_knowledge,
+            'dashboard_data': self.streaming_processor.get_dashboard_data(),
+            'processing_stats': result['statistics']
+        }

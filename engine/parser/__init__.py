@@ -4,6 +4,12 @@ Parser Module - File Type-Specific Parsing Factory
 This module provides a factory pattern for parsing different file types.
 Each file format (.json, .txt, .md, .pdf) has its own dedicated parser class
 with specialized logic for handling that format's characteristics.
+
+Features:
+    - Format-specific parsers (JSON, TXT, Markdown, PDF)
+    - Schema-guided recovery for malformed JSON files
+    - File size validation (max 50MB or 200k tokens)
+    - Performance benchmarking utilities
 """
 
 import os
@@ -14,6 +20,7 @@ from .json_parser import JSONParser
 from .txt_parser import TXTParser
 from .markdown_parser import MarkdownParser
 from .pdf_parser import PDFParser
+from .benchmark import ParserBenchmark, run_parser_benchmarks
 
 
 # Registry of available parsers by file extension
@@ -95,4 +102,6 @@ __all__ = [
     'TXTParser',
     'MarkdownParser',
     'PDFParser',
+    'ParserBenchmark',
+    'run_parser_benchmarks',
 ]
