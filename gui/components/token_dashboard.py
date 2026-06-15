@@ -45,16 +45,16 @@ class TokenDashboardWidget(QFrame):
         summary_layout = QGridLayout()
         summary_layout.setSpacing(8)
         
-        # Create summary cards
-        self.card_raw_tokens = self._create_summary_card("Total Raw Tokens", "0", "#3d3d3d")
-        self.card_compressed_tokens = self._create_summary_card("Compressed Tokens", "0", "#3d3d3d")
-        self.card_compression_ratio = self._create_summary_card("Compression Ratio", "0%", "#3d3d3d")
-        self.card_avg_processing_time = self._create_summary_card("Avg Processing Time", "0s", "#3d3d3d")
+        # Create summary cards (store both card frame and value_label)
+        self.card_raw_tokens, self.label_raw_tokens = self._create_summary_card("Total Raw Tokens", "0", "#3d3d3d")
+        self.card_compressed_tokens, self.label_compressed_tokens = self._create_summary_card("Compressed Tokens", "0", "#3d3d3d")
+        self.card_compression_ratio, self.label_compression_ratio = self._create_summary_card("Compression Ratio", "0%", "#3d3d3d")
+        self.card_avg_processing_time, self.label_avg_processing_time = self._create_summary_card("Avg Processing Time", "0s", "#3d3d3d")
         
-        summary_layout.addWidget(self.card_raw_tokens, 0, 0)
-        summary_layout.addWidget(self.card_compressed_tokens, 0, 1)
-        summary_layout.addWidget(self.card_compression_ratio, 1, 0)
-        summary_layout.addWidget(self.card_avg_processing_time, 1, 1)
+        summary_layout.addWidget(self.card_raw_tokens[0] if isinstance(self.card_raw_tokens, tuple) else self.card_raw_tokens, 0, 0)
+        summary_layout.addWidget(self.card_compressed_tokens[0] if isinstance(self.card_compressed_tokens, tuple) else self.card_compressed_tokens, 0, 1)
+        summary_layout.addWidget(self.card_compression_ratio[0] if isinstance(self.card_compression_ratio, tuple) else self.card_compression_ratio, 1, 0)
+        summary_layout.addWidget(self.card_avg_processing_time[0] if isinstance(self.card_avg_processing_time, tuple) else self.card_avg_processing_time, 1, 1)
         
         main_layout.addLayout(summary_layout)
         
@@ -160,8 +160,8 @@ class TokenDashboardWidget(QFrame):
         button_layout.addStretch()
         main_layout.addLayout(button_layout)
     
-    def _create_summary_card(self, title: str, value: str, bg_color: str) -> QFrame:
-        """Create a summary statistic card."""
+    def _create_summary_card(self, title: str, value: str, bg_color: str) -> tuple:
+        """Create a summary statistic card. Returns (card_frame, value_label)."""
         card = QFrame()
         card.setFrameShape(QFrame.Shape.StyledPanel)
         card.setFrameShadow(QFrame.Shadow.Raised)
@@ -180,7 +180,7 @@ class TokenDashboardWidget(QFrame):
         value_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(value_label)
         
-        return card
+        return card, value_label
     
     def update_dashboard(self, project_name: str, stats: dict):
         """
@@ -199,9 +199,9 @@ class TokenDashboardWidget(QFrame):
         
         overall_ratio = (total_compressed / total_raw * 100) if total_raw > 0 else 0
         
-        self.card_raw_tokens.findChild(QLabel, 1).setText(self._format_number(total_raw))
-        self.card_compressed_tokens.findChild(QLabel, 1).setText(self._format_number(total_compressed))
-        self.card_compression_ratio.findChild(QLabel, 1).setText(f"{overall_ratio:.1f}%")
+        self.label_raw_tokens.setText(self._format_number(total_raw))
+        self.label_compressed_tokens.setText(self._format_number(total_compressed))
+        self.label_compression_ratio.setText(f"{overall_ratio:.1f}%")
         
         # Update progress bar
         max_tokens = 10000  # Default budget
@@ -267,9 +267,9 @@ class TokenDashboardWidget(QFrame):
     def clear_dashboard(self):
         """Clear all dashboard data."""
         self.project_stats.clear()
-        self.card_raw_tokens.findChild(QLabel, 1).setText("0")
-        self.card_compressed_tokens.findChild(QLabel, 1).setText("0")
-        self.card_compression_ratio.findChild(QLabel, 1).setText("0%")
+        self.label_raw_tokens.setText("0")
+        self.label_compressed_tokens.setText("0")
+        self.label_compression_ratio.setText("0%")
         self.budget_progress.setValue(0)
         self.stats_table.setRowCount(0)
 

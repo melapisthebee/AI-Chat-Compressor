@@ -348,6 +348,7 @@ class CompressionEngine:
         # Define chunk processing callback
         def process_chunk_callback(chunk_data, chunk_index):
             """Process a single chunk through the LLM pipeline."""
+            nonlocal active_knowledge
             decoded_chunk = chunk_data['text']
             
             # PASS 1: EXTRACTION for this chunk
