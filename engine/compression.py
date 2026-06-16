@@ -468,11 +468,18 @@ class CompressionEngine:
             processing_stats['chunks_processed'] = chunk_index + 1
             processing_stats['total_tokens_processed'] += chunk_data['token_count']
             
+            # Check if we've exceeded the target token budget
+            compressed_summary_block = json.dumps(active_knowledge)
+            current_compressed_tokens = tracker.count_tokens(compressed_summary_block)
+            budget_reached = current_compressed_tokens >= self.streaming_processor.max_target_tokens
+            
             return {
                 'chunk_index': chunk_index,
                 'tokens_processed': chunk_data['token_count'],
                 'is_tail_chunk': chunk_data['is_tail_chunk'],
-                'active_categories': len(active_knowledge.keys())
+                'active_categories': len(active_knowledge.keys()),
+                'current_compressed_tokens': current_compressed_tokens,
+                'budget_reached': budget_reached
             }
         
         # Use streaming processor for memory-efficient processing

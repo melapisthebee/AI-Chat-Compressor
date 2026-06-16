@@ -119,6 +119,11 @@ def update_adaptive_knowledge(
         if not isinstance(updated_knowledge, dict):
             print(f"⚠️ Invalid knowledge format: expected dict, got {type(updated_knowledge)}")
             return False
+        
+        # Early exit if empty delta - no need to do database work
+        if not updated_knowledge:
+            print("⏭️ Skipping database update (empty knowledge delta)")
+            return True
             
         # 1. Fetch current stored knowledge records for this project
         with db_write_lock:
