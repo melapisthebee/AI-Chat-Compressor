@@ -120,11 +120,33 @@ class CompressionEngine:
         # Should never reach here, but just in case
         raise last_exception
 
+    def _deep_compare(self, base: Dict[str, Any], delta: Dict[str, Any]) -> bool:
+        """
+        Deep comparison to check if delta is identical to base.
+        Returns True if they are identical (no changes needed).
+        """
+        if set(base.keys()) != set(delta.keys()):
+            return False
+        for key in base.keys():
+            if key not in delta:
+                return False
+            if isinstance(base[key], dict) and isinstance(delta[key], dict):
+                if not self._deep_compare(base[key], delta[key]):
+                    return False
+            elif base[key] != delta[key]:
+                return False
+        return True
+
     def _deep_merge(self, base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
         """
         Recursively updates the base dictionary structure with fresh delta attributes.
         Preserves untouched sibling keys at all depths of the nested JSON tree.
+        SKIPS merge if delta is identical to existing data.
         """
+        # Quick equality check to skip redundant merges
+        if self._deep_compare(base, delta):
+            return base  # No changes needed
+        
         for key, value in delta.items():
             if isinstance(value, dict) and key in base and isinstance(base[key], dict):
                 self._deep_merge(base[key], value)
@@ -428,16 +450,19 @@ class CompressionEngine:
                 print(f"   ⚠️ Extraction error on chunk {chunk_index}: {str(e)[:100]}")
                 # Continue with existing knowledge
             
-            # PASS 2: AUDIT for this chunk (only if extraction succeeded)
-            print(f"   🔎 Audit pass on chunk {chunk_index}...")
-            try:
-                audit_delta = self._call_llm_for_verification(active_knowledge, decoded_chunk)
-                if audit_delta:
-                    print(f"   ✓ Audit found {len(audit_delta)} corrections/additions")
-                    active_knowledge = self._deep_merge(active_knowledge, audit_delta)
-            except Exception as e:
-                print(f"   ⚠️ Audit error on chunk {chunk_index}: {str(e)[:100]}")
-                # Continue with existing knowledge
+            # PASS 2: AUDIT for this chunk (SKIP if extraction returned empty delta)
+            if delta:  # Only run audit if extraction found something
+                print(f"   🔎 Audit pass on chunk {chunk_index}...")
+                try:
+                    audit_delta = self._call_llm_for_verification(active_knowledge, decoded_chunk)
+                    if audit_delta:
+                        print(f"   ✓ Audit found {len(audit_delta)} corrections/additions")
+                        active_knowledge = self._deep_merge(active_knowledge, audit_delta)
+                except Exception as e:
+                    print(f"   ⚠️ Audit error on chunk {chunk_index}: {str(e)[:100]}")
+                    # Continue with existing knowledge
+            else:
+                print(f"   ⏭️ Skipping audit pass (empty extraction delta)")
             
             # Update stats
             processing_stats['chunks_processed'] = chunk_index + 1

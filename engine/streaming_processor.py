@@ -33,12 +33,16 @@ class StreamingTokenProcessor:
         Args:
             max_target_tokens: Maximum target token count (default: settings.MAX_TARGET_TOKENS)
             chunk_size_tokens: Size of each processing chunk (default: settings.CHUNK_SIZE_TOKENS)
-            overlap_tokens: Overlap between consecutive chunks to prevent context fragmentation
+            overlap_tokens: Overlap between consecutive chunks to prevent context fragmentation (default: 10% for large chunks)
             preserve_recent_tokens: Number of recent tokens to preserve unmodified
         """
         self.max_target_tokens = max_target_tokens or settings.MAX_TARGET_TOKENS
         self.chunk_size_tokens = chunk_size_tokens or settings.CHUNK_SIZE_TOKENS
-        self.overlap_tokens = overlap_tokens or max(500, self.chunk_size_tokens // 4)  # Default 25% overlap
+        # Reduced overlap from 25% to 10% for large chunks to minimize redundant processing
+        if chunk_size_tokens:
+            self.overlap_tokens = overlap_tokens or max(500, int(chunk_size_tokens * 0.10))
+        else:
+            self.overlap_tokens = overlap_tokens or max(500, int(settings.CHUNK_SIZE_TOKENS * 0.10))
         self.preserve_recent_tokens = preserve_recent_tokens or settings.PRESERVE_RECENT_TOKENS
         
         # Statistics tracking for dashboard
@@ -183,6 +187,11 @@ class StreamingTokenProcessor:
             # Process the chunk via callback
             chunk_result = process_chunk_callback(chunk_data, chunk_index)
             results.append(chunk_result)
+            
+            # Check for early termination if callback indicates budget reached
+            if chunk_result and chunk_result.get('budget_reached', False):
+                print(f"🎯 Target token budget reached at chunk {chunk_index}, stopping early")
+                break
             
             # Force garbage collection periodically for very large files
             if chunk_index % 10 == 0:
