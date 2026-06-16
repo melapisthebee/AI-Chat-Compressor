@@ -33,6 +33,28 @@ class CompressionEngine:
         )
         self.streaming_processor = streaming_processor or StreamingTokenProcessor()
         self.token_budget_manager = TokenBudgetManager()
+    
+    def check_lm_studio_health(self) -> bool:
+        """
+        Checks if LM Studio is running and responding.
+        
+        Returns:
+            True if healthy, False otherwise
+        """
+        try:
+            # Try a simple models list call to verify connectivity
+            response = self.client.models.list()
+            models = list(response)
+            if models:
+                print(f"✓ LM Studio is healthy. Available models: {len(models)}")
+                return True
+            else:
+                print("⚠️ LM Studio is running but returned no models")
+                return False
+        except Exception as e:
+            print(f"❌ LM Studio health check failed: {str(e)}")
+            print("   Please ensure LM Studio is running and the server is enabled.")
+            return False
 
     def _call_llm_with_retry(self, call_func, *args, **kwargs):
         """
@@ -59,15 +81,38 @@ class CompressionEngine:
                 return call_func(*args, **kwargs)
             except (APIConnectionError, APITimeoutError, RateLimitError) as e:
                 last_exception = e
+                error_str = str(e).lower()
+                
+                # Check for non-retryable errors (model unloaded, terminated, etc.)
+                if "model is unloaded" in error_str or "terminated" in error_str:
+                    print(f"❌ Non-retryable error: {str(e)}")
+                    raise RuntimeError(f"Model unavailable: {str(e)}. Please reload the model in LM Studio and retry.")
+                
+                # For timeouts, provide helpful context
+                if "timeout" in error_str and attempt == 0:
+                    print(f"⚠️ First timeout detected. This can happen with large conversations or slow models.")
+                    print(f"   LM Studio may still be processing. Retrying with exponential backoff...")
+                
                 if attempt < max_retries:
                     delay = base_delay * (2 ** attempt)  # Exponential backoff
                     print(f"⚠️ Transient failure detected (attempt {attempt + 1}/{max_retries + 1}): {str(e)}")
                     print(f"🔄 Retrying in {delay} seconds...")
+                    print(f"   💡 Tip: If this persists, try:\n      - Loading a smaller/faster model in LM Studio\n      - Increasing REQUEST_TIMEOUT in settings.py\n      - Reducing chunk size in the app")
                     time.sleep(delay)
                 else:
                     print(f"❌ All {max_retries + 1} attempts failed. Last error: {str(e)}")
-                    raise
+                    print(f"\n💡 Troubleshooting:")
+                    print(f"   1. Check that LM Studio is running and the model is loaded")
+                    print(f"   2. Try loading a smaller model (e.g., 7B instead of 70B)")
+                    print(f"   3. Increase REQUEST_TIMEOUT in config/settings.py (currently {settings.REQUEST_TIMEOUT}s)")
+                    print(f"   4. Reduce chunk size in the app settings")
+                    raise RuntimeError(f"LM Studio API failed after {max_retries + 1} attempts. {str(e)}")
             except Exception as e:
+                # Check for non-retryable errors in other exceptions too
+                error_str = str(e).lower()
+                if "model is unloaded" in error_str or "terminated" in error_str:
+                    print(f"❌ Non-retryable error: {str(e)}")
+                    raise RuntimeError(f"Model unavailable: {str(e)}. Please reload the model in LM Studio and retry.")
                 # Non-transient errors, don't retry
                 print(f"❌ Non-retryable error: {str(e)}")
                 raise
@@ -338,12 +383,27 @@ class CompressionEngine:
         
         Uses streaming chunk processing for memory efficiency on large files.
         """
+        # Health check before starting
+        print("\n🔍 Checking LM Studio connectivity...")
+        if not self.check_lm_studio_health():
+            raise RuntimeError("LM Studio is not responding. Please start LM Studio, load a model, and enable the server.")
+        
         # Load baseline
+        print("💾 Loading current project knowledge state...")
         active_knowledge = get_project_knowledge(db, project_id)
+        if active_knowledge:
+            print(f"✓ Loaded {len(active_knowledge)} existing knowledge categories")
+        else:
+            print("ℹ️ Starting with empty knowledge base")
         
         # Prepare text streams
         total_raw_text = "\n\n".join([f"{m['role'].upper()}: {m['content']}" for m in incoming_messages])
         raw_token_count = tracker.count_tokens(total_raw_text)
+        print(f"\n📊 Processing conversation with {raw_token_count:,} estimated tokens...")
+        print(f"⏱️  Request timeout set to {settings.REQUEST_TIMEOUT} seconds")
+        
+        # Track progress externally
+        processing_stats = {'chunks_processed': 0, 'total_tokens_processed': 0}
         
         # Define chunk processing callback
         def process_chunk_callback(chunk_data, chunk_index):
@@ -351,19 +411,43 @@ class CompressionEngine:
             nonlocal active_knowledge
             decoded_chunk = chunk_data['text']
             
-            # PASS 1: EXTRACTION for this chunk
-            delta = self._call_llm_for_knowledge_merge(active_knowledge, decoded_chunk)
-            active_knowledge = self._deep_merge(active_knowledge, delta)
+            # Enhanced progress indicator with detailed state
+            if chunk_index % 5 == 0 or chunk_data['is_tail_chunk']:
+                status = "(TAIL CHUNK)" if chunk_data['is_tail_chunk'] else f"({processing_stats['chunks_processed']} LLM calls made)"
+                print(f"🔄 Processing chunk {chunk_index}... ({len(decoded_chunk)} chars, {chunk_data['token_count']} tokens) {status}")
+                print(f"   📊 Current knowledge categories: {len(active_knowledge.keys())}")
             
-            # PASS 2: AUDIT for this chunk
-            audit_delta = self._call_llm_for_verification(active_knowledge, decoded_chunk)
-            if audit_delta:
-                active_knowledge = self._deep_merge(active_knowledge, audit_delta)
+            # PASS 1: EXTRACTION for this chunk
+            print(f"   🔍 Extraction pass on chunk {chunk_index}...")
+            try:
+                delta = self._call_llm_for_knowledge_merge(active_knowledge, decoded_chunk)
+                if delta:  # Only log if there's actual content
+                    print(f"   ✓ Extracted {len(delta)} new/updated categories")
+                active_knowledge = self._deep_merge(active_knowledge, delta)
+            except Exception as e:
+                print(f"   ⚠️ Extraction error on chunk {chunk_index}: {str(e)[:100]}")
+                # Continue with existing knowledge
+            
+            # PASS 2: AUDIT for this chunk (only if extraction succeeded)
+            print(f"   🔎 Audit pass on chunk {chunk_index}...")
+            try:
+                audit_delta = self._call_llm_for_verification(active_knowledge, decoded_chunk)
+                if audit_delta:
+                    print(f"   ✓ Audit found {len(audit_delta)} corrections/additions")
+                    active_knowledge = self._deep_merge(active_knowledge, audit_delta)
+            except Exception as e:
+                print(f"   ⚠️ Audit error on chunk {chunk_index}: {str(e)[:100]}")
+                # Continue with existing knowledge
+            
+            # Update stats
+            processing_stats['chunks_processed'] = chunk_index + 1
+            processing_stats['total_tokens_processed'] += chunk_data['token_count']
             
             return {
                 'chunk_index': chunk_index,
                 'tokens_processed': chunk_data['token_count'],
-                'is_tail_chunk': chunk_data['is_tail_chunk']
+                'is_tail_chunk': chunk_data['is_tail_chunk'],
+                'active_categories': len(active_knowledge.keys())
             }
         
         # Use streaming processor for memory-efficient processing
@@ -371,11 +455,21 @@ class CompressionEngine:
         print(f"Chunk size: {self.streaming_processor.chunk_size_tokens} tokens")
         print(f"Overlap: {self.streaming_processor.overlap_tokens} tokens")
         
-        result = self.streaming_processor.stream_process_large_file(
-            text=total_raw_text,
-            process_chunk_callback=process_chunk_callback,
-            preserve_tail=True
-        )
+        try:
+            print("\n🚀 Starting LLM processing...")
+            result = self.streaming_processor.stream_process_large_file(
+                text=total_raw_text,
+                process_chunk_callback=process_chunk_callback,
+                preserve_tail=True
+            )
+            stream_stats = result.get('statistics', {})
+            print(f"\n✅ Completed processing {stream_stats.get('total_chunks_processed', 0)} chunks")
+        except RuntimeError as e:
+            # Re-raise critical errors (like model unloaded)
+            raise
+        except Exception as e:
+            # Wrap other errors with context
+            raise RuntimeError(f"Error during chunk processing: {str(e)}") from e
         
         # Update processing statistics
         self.streaming_processor.update_stats(
@@ -409,9 +503,21 @@ class CompressionEngine:
             raw_context_stream=total_raw_text
         )
         
+        # Update stats with final compressed count and prepare dashboard data
+        dashboard_data = self.streaming_processor.get_dashboard_data()
+        
+        print(f"\n📊 Dashboard Data: {dashboard_data}")
+        print(f"✅ Knowledge base updated with {len(active_knowledge)} categories")
+        
         # Return dashboard data along with knowledge
+        stream_stats = result.get('statistics', {})
         return {
             'knowledge': active_knowledge,
-            'dashboard_data': self.streaming_processor.get_dashboard_data(),
-            'processing_stats': result['statistics']
+            'dashboard_data': dashboard_data,
+            'processing_stats': {
+                'chunks_processed': stream_stats.get('total_chunks_processed', 0),
+                'total_tokens_processed': stream_stats.get('total_raw_tokens', 0),
+                'processing_time_seconds': stream_stats.get('processing_time_seconds', 0),
+                'memory_efficiency': stream_stats.get('memory_efficiency', 0)
+            }
         }

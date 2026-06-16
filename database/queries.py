@@ -114,50 +114,79 @@ def update_adaptive_knowledge(
     raw text stream. If not, the omission is treated as context exclusion rather 
     than a true deletion request, preserving the historical record.
     """
-    # 1. Fetch current stored knowledge records for this project
-    with db_write_lock:
-        existing_records = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
-        existing_map = {record.category: record for record in existing_records}
-    
-        # 2. Process updates and additions
-        for category, fresh_content in updated_knowledge.items():
-            if category in existing_map:
-                # Overwrite content if it changed (SQLAlchemy detects internal dict modifications)
-                record = existing_map[category]
-                record.content = fresh_content
-                record.last_updated_by_session_id = session_id
-                record.updated_at = datetime.utcnow()
-            else:
-                # Create a brand new knowledge segment storing native JSON/dict
-                new_record = KnowledgeCore(
-                    project_id=project_id,
-                    category=category,
-                    content=fresh_content,
-                    last_updated_by_session_id=session_id
-                )
-                db.add(new_record)
-                
-        # 3. Handle deletions with structural truncation and semantic omission guardrails
-        if updated_knowledge:
-            for category, old_record in existing_map.items():
-                if category not in updated_knowledge:
-                    
-                    # Semantic validation check
-                    if raw_context_stream:
-                        normalized_stream = raw_context_stream.lower()
-                        # Extract alphanumeric keyword parts (e.g., "database_layer" -> ["database", "layer"])
-                        keywords = re.findall(r'\w+', category.lower())
-                        
-                        # If descriptive category keys were completely absent from the processed text chunk,
-                        # the file simply didn't contain info on this domain. Skip deletion to protect state.
-                        if keywords and not any(kw in normalized_stream for kw in keywords):
-                            continue  # Safe bypass
-                    
-                    db.delete(old_record)
-                    
-        # 4. Touch the project timestamp to show it was modified
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if project:
-            project.updated_at = datetime.utcnow()
+    try:
+        # Validate input
+        if not isinstance(updated_knowledge, dict):
+            print(f"⚠️ Invalid knowledge format: expected dict, got {type(updated_knowledge)}")
+            return False
             
-    db.commit()
+        # 1. Fetch current stored knowledge records for this project
+        with db_write_lock:
+            existing_records = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
+            existing_map = {record.category: record for record in existing_records}
+            
+            print(f"💾 Database update: Found {len(existing_map)} existing categories")
+            print(f"   Incoming update has {len(updated_knowledge)} categories")
+        
+            # 2. Process updates and additions
+            added_count = 0
+            updated_count = 0
+            for category, fresh_content in updated_knowledge.items():
+                if category in existing_map:
+                    # Overwrite content if it changed (SQLAlchemy detects internal dict modifications)
+                    record = existing_map[category]
+                    record.content = fresh_content
+                    record.last_updated_by_session_id = session_id
+                    record.updated_at = datetime.utcnow()
+                    updated_count += 1
+                else:
+                    # Create a brand new knowledge segment storing native JSON/dict
+                    new_record = KnowledgeCore(
+                        project_id=project_id,
+                        category=category,
+                        content=fresh_content,
+                        last_updated_by_session_id=session_id
+                    )
+                    db.add(new_record)
+                    added_count += 1
+            
+            print(f"   ✓ Processed: {updated_count} updated, {added_count} added")
+            
+            # 3. Handle deletions with structural truncation and semantic omission guardrails
+            deleted_count = 0
+            if updated_knowledge:
+                for category, old_record in existing_map.items():
+                    if category not in updated_knowledge:
+                        
+                        # Semantic validation check
+                        should_delete = True
+                        if raw_context_stream:
+                            normalized_stream = raw_context_stream.lower()
+                            # Extract alphanumeric keyword parts (e.g., "database_layer" -> ["database", "layer"])
+                            keywords = re.findall(r'\w+', category.lower())
+                            
+                            # If descriptive category keys were completely absent from the processed text chunk,
+                            # the file simply didn't contain info on this domain. Skip deletion to protect state.
+                            if keywords and not any(kw in normalized_stream for kw in keywords):
+                                should_delete = False
+                        
+                        if should_delete:
+                            db.delete(old_record)
+                            deleted_count += 1
+            
+            print(f"   ✓ Deleted {deleted_count} obsolete categories")
+            
+            # 4. Touch the project timestamp to show it was modified
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if project:
+                project.updated_at = datetime.utcnow()
+        
+        # Commit outside the lock but within the transaction
+        db.commit()
+        print(f"✅ Knowledge base updated successfully")
+        return True
+            
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Database update failed: {str(e)}")
+        raise

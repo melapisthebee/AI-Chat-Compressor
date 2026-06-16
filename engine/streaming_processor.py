@@ -86,22 +86,35 @@ class StreamingTokenProcessor:
         chunk_size = chunk_size or self.chunk_size_tokens
         overlap = overlap or self.overlap_tokens
         
+        # Safety check: ensure we always make progress
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+        
+        # Ensure overlap doesn't exceed chunk size to prevent infinite loops
+        effective_overlap = min(overlap, chunk_size - 1)
+        step = max(chunk_size - effective_overlap, 1)  # Ensure at least 1 token progress
+        
         total_tokens = len(tokens)
         start = 0
+        iteration_count = 0
+        max_iterations = (total_tokens // step) + 10  # Safety limit
         
         while start < total_tokens:
+            iteration_count += 1
+            if iteration_count > max_iterations:
+                print(f"⚠️ Sliding window safety limit reached ({max_iterations} iterations), stopping to prevent infinite loop")
+                break
+                
             end = min(start + chunk_size, total_tokens)
             chunk_tokens = tokens[start:end]
             
             # Yield the chunk with metadata
             yield (start, end, chunk_tokens)
             
-            # Move forward by chunk size minus overlap
-            # But ensure we make progress even if overlap >= chunk_size
-            step = max(chunk_size - overlap, chunk_size // 2)
+            # Move forward
             start += step
             
-            # On the last chunk, preserve recent context
+            # On the last chunk, break after yielding
             if end >= total_tokens:
                 break
     
@@ -131,21 +144,31 @@ class StreamingTokenProcessor:
         
         # Quick token estimation for very large files
         estimated_tokens = self.estimate_file_tokens(text)
+        print(f"📊 Estimated file size: {estimated_tokens:,} tokens")
         
         if estimated_tokens < self.chunk_size_tokens * 2:
             # File is small enough to process in one pass
             return self._process_small_file(text, process_chunk_callback)
         
         # Full tokenization for precise processing
+        print("🔄 Tokenizing full text...")
         all_tokens = tracker.split_into_tokens(text)
         self.stats['total_raw_tokens'] = len(all_tokens)
+        print(f"✓ Tokenized {len(all_tokens):,} tokens")
         
         results = []
         chunk_index = 0
+        total_chunks = (len(all_tokens) // max(self.chunk_size_tokens - self.overlap_tokens, 1)) + 1
+        print(f"📋 Total chunks to process: ~{total_chunks}")
         
         # Create sliding windows and process each chunk
         for start_idx, end_idx, chunk_tokens in self.create_sliding_windows(all_tokens):
             chunk_text = tracker.decode_tokens(chunk_tokens)
+            
+            # Log progress every 5 chunks or on major milestones
+            if chunk_index % 10 == 0 or chunk_index == total_chunks - 1:
+                percent = ((chunk_index + 1) / total_chunks) * 100
+                print(f"🔄 Progress: Chunk {chunk_index}/{total_chunks} ({percent:.1f}%)")
             
             # Prepare chunk data with context metadata
             chunk_data = {
@@ -421,6 +444,26 @@ class TokenBudgetManager:
             'max_overlap_ratio': 0.5
         }
         return self.budget_settings.copy()
+    
+    def get_dashboard_data(self) -> Dict[str, Any]:
+        """
+        Get dashboard-ready statistics for the GUI.
+        
+        Returns:
+            Dictionary with token usage and compression stats
+        """
+        raw_tokens = self.stats.get('total_raw_tokens', 0)
+        compressed_tokens = self.stats.get('total_compressed_tokens', 0)
+        ratio = (compressed_tokens / raw_tokens * 100) if raw_tokens > 0 else 0
+        chunks_processed = self.stats.get('chunks_processed', 0)
+        
+        return {
+            'raw_tokens': raw_tokens,
+            'compressed_tokens': compressed_tokens,
+            'ratio': ratio,
+            'chunks': chunks_processed,
+            'status': 'Complete'
+        }
 
 
 # Global instances

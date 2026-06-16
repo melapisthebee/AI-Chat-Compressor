@@ -33,27 +33,38 @@ class CompressionWorker(QThread):
         try:
             self.progress_signal.emit("Parsing source conversation log export file...")
             messages = parse_lm_studio_file(self.filepath)
+            print(f"✓ Parsed {len(messages)} messages from file")
             filename = os.path.basename(self.filepath)
             
             self.progress_signal.emit(f"Retrieving or constructing Project: '{self.project_name}'...")
             project = get_or_create_project(db, self.project_name)
+            print(f"✓ Project '{project.name}' (ID: {project.id}) ready")
             
             self.progress_signal.emit("Running sliding token window synchronization loop through local LLM...")
             engine = CompressionEngine()
             
             # Runs the dynamic context synchronization with streaming support
+            print("\n🚀 Starting compression engine process_and_adapt()...")
             result = engine.process_and_adapt(db, project.id, messages, filename)
             
             # Handle both old and new return formats
             if isinstance(result, dict):
                 updated_knowledge = result.get('knowledge', result)
                 dashboard_data = result.get('dashboard_data', {})
+                processing_stats = result.get('processing_stats', {})
+                print(f"\n✅ Process completed: {len(updated_knowledge)} knowledge categories")
+                if dashboard_data:
+                    print(f"   Dashboard data: {dashboard_data}")
             else:
                 updated_knowledge = result
                 dashboard_data = {}
-            
+                processing_stats = {}
+                
             self.finished_signal.emit(updated_knowledge, self.project_name, dashboard_data)
         except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n{traceback.format_exc()}"
+            print(f"❌ Worker thread failed: {error_detail}")
             self.error_signal.emit(str(e))
         finally:
             db.close()
@@ -457,8 +468,15 @@ class MainWindow(QMainWindow):
         through the explicit Quit-Wait lifecycle execution pattern to prevent 
         'Destroyed while thread is still running' underlying C++ exceptions.
         """
-        if hasattr(self, 'worker') and self.worker.isRunning():
-            self.console_output.append("\n⚠️ System shutting down: Halting background background generation loop...")
-            self.worker.quit()
-            self.worker.wait()
+        if hasattr(self, 'worker') and self.worker is not None:
+            try:
+                if self.worker.isRunning():
+                    self.console_output.append("\n⚠️ System shutting down: Halting background generation loop...")
+                    self.worker.quit()
+                    self.worker.wait(timeout=5000)  # Wait up to 5 seconds
+            except RuntimeError:
+                # Worker thread already deleted, ignore
+                print("⚠️ Worker thread already cleaned up during shutdown")
+            except Exception as e:
+                print(f"⚠️ Error during worker shutdown: {e}")
         event.accept()

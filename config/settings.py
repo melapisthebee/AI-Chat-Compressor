@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     WINDOW_HEIGHT: int = 700
     
     # --- API Configuration ---
-    REQUEST_TIMEOUT: int = 60  # Timeout in seconds for LLM API calls
+    REQUEST_TIMEOUT: int = 120  # Timeout in seconds for LLM API calls (increased for large conversations)
     MAX_RETRIES: int = 3  # Maximum retry attempts for transient failures
     RETRY_BASE_DELAY: int = 1  # Base delay in seconds between retries
     
