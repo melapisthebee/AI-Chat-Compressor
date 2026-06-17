@@ -24,8 +24,10 @@ class TokenDashboardWidget(QFrame):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setup_ui()
         self.project_stats = {}  # Store stats per project
+        self.setup_ui()
+        # Load persisted settings AFTER UI is created
+        self._load_persisted_settings()
     
     def setup_ui(self):
         """Initialize the dashboard UI components."""
@@ -322,6 +324,33 @@ class TokenBudgetSettingsWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setup_ui()
+        # Load persisted settings AFTER UI is created
+        self._load_persisted_settings()
+    
+    def _load_persisted_settings(self):
+        """
+        Load token budget settings from persistent storage and apply to UI controls.
+        """
+        try:
+            from engine.streaming_processor import load_settings_from_file, streaming_processor, token_budget_manager
+            saved_settings = load_settings_from_file()
+            if saved_settings:
+                # Apply saved settings to UI controls
+                self.max_tokens_input.setValue(saved_settings.get('max_target_tokens', 10000))
+                self.chunk_size_input.setValue(saved_settings.get('chunk_size_tokens', 8000))
+                self.overlap_input.setValue(saved_settings.get('overlap_tokens', 2000))
+                self.preserve_input.setValue(saved_settings.get('preserve_recent_tokens', 5000))
+                # Update global instances
+                streaming_processor.max_target_tokens = saved_settings.get('max_target_tokens', 10000)
+                streaming_processor.chunk_size_tokens = saved_settings.get('chunk_size_tokens', 8000)
+                streaming_processor.overlap_tokens = saved_settings.get('overlap_tokens', max(500, int(8000 * 0.10)))
+                streaming_processor.preserve_recent_tokens = saved_settings.get('preserve_recent_tokens', 5000)
+                # Update the token budget manager
+                token_budget_manager.apply_settings(saved_settings)
+                print(f"✓ Loaded persisted token settings from file")
+        except Exception as e:
+            print(f"⚠️ Error loading persisted settings: {e}")
+            # Fall back to defaults
     
     def setup_ui(self):
         """Initialize the settings UI."""
@@ -456,7 +485,7 @@ class TokenBudgetSettingsWidget(QFrame):
         }
         
         # Validate
-        from engine.streaming_processor import token_budget_manager
+        from engine.streaming_processor import token_budget_manager, streaming_processor, save_settings_to_file
         is_valid, error_msg = token_budget_manager.validate_settings(settings)
         
         if is_valid:
@@ -464,7 +493,6 @@ class TokenBudgetSettingsWidget(QFrame):
             self.validation_label.setStyleSheet("color: #4caf50;")
             
             # Update streaming processor with new settings
-            from engine.streaming_processor import streaming_processor, token_budget_manager
             streaming_processor.max_target_tokens = settings['max_target_tokens']
             streaming_processor.chunk_size_tokens = settings['chunk_size_tokens']
             streaming_processor.overlap_tokens = settings['overlap_tokens']
@@ -473,8 +501,11 @@ class TokenBudgetSettingsWidget(QFrame):
             # Also update the budget manager
             token_budget_manager.apply_settings(settings)
             
+            # Save settings to file for persistence
+            if save_settings_to_file(settings):
+                self.validation_label.setText("✓ Settings applied and saved!")
+            
             # Emit signal to notify dashboard and other components
-            # The signal is already defined as pyqtSignal, just emit it once
             self.settings_changed.emit(settings)
         else:
             self.validation_label.setText(f"❌ {error_msg}")

@@ -13,18 +13,20 @@ except ImportError:
 
 from config.settings import settings
 from engine.tokenizer import tracker
-from engine.streaming_processor import StreamingTokenProcessor, TokenBudgetManager
+from engine.streaming_processor import streaming_processor, token_budget_manager
 from database.queries import get_project_knowledge, create_session_record, update_adaptive_knowledge
 
 
 class CompressionEngine:
-    def __init__(self, streaming_processor: Optional[StreamingTokenProcessor] = None, stats_callback=None):
+    def __init__(self, stats_callback=None):
         """
         Initializes the compression engine client utilizing configured environment parameters
         loaded via Pydantic Settings. Assumes a running local instance of LM Studio.
         
+        Uses global streaming_processor and token_budget_manager instances to respect
+        user-configured token settings.
+        
         Args:
-            streaming_processor: Optional custom streaming processor instance
             stats_callback: Optional callback function called per chunk with (raw_tokens, compressed_tokens, ratio, chunks_processed)
         """
         self.client = OpenAI(
@@ -32,8 +34,8 @@ class CompressionEngine:
             api_key=settings.LM_STUDIO_API_KEY,
             timeout=settings.REQUEST_TIMEOUT
         )
-        self.streaming_processor = streaming_processor or StreamingTokenProcessor()
-        self.token_budget_manager = TokenBudgetManager()
+        self.streaming_processor = streaming_processor
+        self.token_budget_manager = token_budget_manager
         self.stats_callback = stats_callback
     
     def check_lm_studio_health(self) -> bool:
@@ -479,12 +481,15 @@ class CompressionEngine:
             # Emit live stats callback for dashboard updates
             if self.stats_callback:
                 ratio = (current_compressed_tokens / raw_token_count * 100) if raw_token_count > 0 else 0
-                self.stats_callback(
-                    raw_tokens=raw_token_count,
-                    compressed_tokens=current_compressed_tokens,
-                    ratio=ratio,
-                    chunks_processed=processing_stats['chunks_processed']
-                )
+                # Only emit stats update every 2 chunks to avoid overwhelming the GUI thread
+                # and ensure smooth real-time updates
+                if chunk_index % 2 == 0 or chunk_data['is_tail_chunk']:
+                    self.stats_callback(
+                        raw_tokens=raw_token_count,
+                        compressed_tokens=current_compressed_tokens,
+                        ratio=ratio,
+                        chunks_processed=processing_stats['chunks_processed']
+                    )
             
             # Check if we've exceeded the target token budget
             budget_reached = current_compressed_tokens >= self.streaming_processor.max_target_tokens

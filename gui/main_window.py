@@ -51,6 +51,7 @@ class CompressionWorker(QThread):
                     'chunks': chunks_processed,
                     'status': 'Processing'
                 }
+                # Emit signal to update dashboard in real-time
                 self.stats_signal.emit(self.project_name, stats_data)
             
             engine = CompressionEngine(stats_callback=_live_stats)
@@ -201,7 +202,11 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.token_dashboard, "📊 Token Dashboard")
         
         # Initialize dashboard with current settings after creation
-        from engine.streaming_processor import token_budget_manager
+        from engine.streaming_processor import token_budget_manager, initialize_settings_from_file
+        
+        # Load persisted settings on startup
+        initialize_settings_from_file()
+        
         current_settings = token_budget_manager.get_current_settings()
         self.token_dashboard.update_settings(current_settings)
         
@@ -279,11 +284,22 @@ class MainWindow(QMainWindow):
         # Spawn the processing lifecycle thread
         self.worker = CompressionWorker(project_name, filepath)
         self.worker.progress_signal.connect(self.update_status)
-        self.worker.stats_signal.connect(self.token_dashboard.update_dashboard)
+        self.worker.stats_signal.connect(self._handle_live_stats_update)
         self.worker.error_signal.connect(self.handle_worker_error)
         self.worker.finished_signal.connect(self.handle_worker_success)
         
         self.worker.start()
+    
+    def _handle_live_stats_update(self, project_name: str, stats_data: dict):
+        """
+        Handle live statistics updates during chunk processing.
+        Ensures dashboard updates in real-time as chunks are processed.
+        """
+        # Update dashboard immediately with live stats
+        self.token_dashboard.update_dashboard(project_name, stats_data)
+        # Also update console with progress info
+        if 'chunks' in stats_data and 'status' in stats_data:
+            self.console_output.append(f"\n📊 Live Stats: {stats_data['chunks']} chunks processed, Status: {stats_data['status']}")
 
     def update_status(self, text: str):
         self.console_output.append(f"⚙️ {text}")

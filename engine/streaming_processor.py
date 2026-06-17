@@ -475,6 +475,66 @@ class TokenBudgetManager:
         }
 
 
-# Global instances
+# Global instances - these will be used by all components
+# Settings are loaded from config and can be updated via UI
 streaming_processor = StreamingTokenProcessor()
 token_budget_manager = TokenBudgetManager()
+
+def save_settings_to_file(settings_dict: Dict[str, Any]) -> bool:
+    """
+    Save token budget settings to a JSON file for persistence across restarts.
+    
+    Args:
+        settings_dict: Dictionary of settings to save
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    import json
+    from config.settings import PROJECT_ROOT
+    settings_file = PROJECT_ROOT / "storage" / "token_settings.json"
+    try:
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(settings_file, 'w') as f:
+            json.dump(settings_dict, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving settings: {e}")
+        return False
+
+def load_settings_from_file() -> Optional[Dict[str, Any]]:
+    """
+    Load token budget settings from a JSON file.
+    
+    Returns:
+        Dictionary of settings or None if file doesn't exist or error occurs
+    """
+    import json
+    from config.settings import PROJECT_ROOT
+    settings_file = PROJECT_ROOT / "storage" / "token_settings.json"
+    try:
+        if settings_file.exists():
+            with open(settings_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading settings: {e}")
+    return None
+
+def initialize_settings_from_file():
+    """
+    Initialize global instances with persisted settings on startup.
+    """
+    saved_settings = load_settings_from_file()
+    if saved_settings:
+        try:
+            token_budget_manager.apply_settings(saved_settings)
+            # Update streaming processor with loaded settings
+            streaming_processor.max_target_tokens = saved_settings.get('max_target_tokens', settings.MAX_TARGET_TOKENS)
+            streaming_processor.chunk_size_tokens = saved_settings.get('chunk_size_tokens', settings.CHUNK_SIZE_TOKENS)
+            streaming_processor.overlap_tokens = saved_settings.get('overlap_tokens', max(500, int(settings.CHUNK_SIZE_TOKENS * 0.10)))
+            streaming_processor.preserve_recent_tokens = saved_settings.get('preserve_recent_tokens', settings.PRESERVE_RECENT_TOKENS)
+            print(f"✓ Loaded persisted token settings from file")
+        except Exception as e:
+            print(f"⚠️ Error loading settings from file: {e}")
+            # Fall back to defaults
+
