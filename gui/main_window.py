@@ -20,6 +20,7 @@ class CompressionWorker(QThread):
     without freezing the GUI interface thread.
     """
     progress_signal = pyqtSignal(str)
+    stats_signal = pyqtSignal(str, dict)  # project_name, dashboard_data per chunk
     finished_signal = pyqtSignal(dict, str, dict)  # knowledge, project_name, dashboard_data
     error_signal = pyqtSignal(str)
 
@@ -41,7 +42,18 @@ class CompressionWorker(QThread):
             print(f"✓ Project '{project.name}' (ID: {project.id}) ready")
             
             self.progress_signal.emit("Running sliding token window synchronization loop through local LLM...")
-            engine = CompressionEngine()
+            
+            def _live_stats(raw_tokens, compressed_tokens, ratio, chunks_processed):
+                stats_data = {
+                    'raw_tokens': raw_tokens,
+                    'compressed_tokens': compressed_tokens,
+                    'ratio': ratio,
+                    'chunks': chunks_processed,
+                    'status': 'Processing'
+                }
+                self.stats_signal.emit(self.project_name, stats_data)
+            
+            engine = CompressionEngine(stats_callback=_live_stats)
             
             # Runs the dynamic context synchronization with streaming support
             print("\n🚀 Starting compression engine process_and_adapt()...")
@@ -267,6 +279,7 @@ class MainWindow(QMainWindow):
         # Spawn the processing lifecycle thread
         self.worker = CompressionWorker(project_name, filepath)
         self.worker.progress_signal.connect(self.update_status)
+        self.worker.stats_signal.connect(self.token_dashboard.update_dashboard)
         self.worker.error_signal.connect(self.handle_worker_error)
         self.worker.finished_signal.connect(self.handle_worker_success)
         
@@ -379,11 +392,26 @@ class MainWindow(QMainWindow):
         pretty_json = json.dumps(final_knowledge, indent=2)
         self.console_output.append(pretty_json)
         
-        # Update dashboard with new statistics
-        if dashboard_data:
-            self.token_dashboard.update_dashboard(project_name, dashboard_data)
-            # Store stats for this project
-            self.current_project_stats[project_name] = dashboard_data
+        # Always update dashboard with final statistics, even if dashboard_data is empty
+        # The dashboard should reflect the final state after processing completes
+        current_stats = {
+            'raw_tokens': dashboard_data.get('total_raw_tokens', 0),
+            'compressed_tokens': dashboard_data.get('total_compressed_tokens', 0),
+            'ratio': dashboard_data.get('compression_ratio_decimal', 0) * 100,
+            'chunks': dashboard_data.get('chunks_processed', 0),
+            'status': 'Complete'
+        } if dashboard_data else {
+            'raw_tokens': 0,
+            'compressed_tokens': 0,
+            'ratio': 0,
+            'chunks': 0,
+            'status': 'Complete'
+        }
+        
+        # Update dashboard with final stats
+        self.token_dashboard.update_dashboard(project_name, current_stats)
+        # Store stats for this project
+        self.current_project_stats[project_name] = current_stats
         
         self.refresh_project_dropdown()
         self.project_input.setCurrentText(project_name)

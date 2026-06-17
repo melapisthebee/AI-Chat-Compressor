@@ -198,15 +198,17 @@ class TokenDashboardWidget(QFrame):
             project_name: Name of the project
             stats: Dictionary with statistics (raw_tokens, compressed_tokens, ratio, etc.)
         """
-        # Store project stats
+        # Store project stats (overwrite previous stats for this project)
         self.project_stats[project_name] = stats
         
+        # Force update the UI - called from worker thread via signal, ensures main thread execution
         # Update summary cards
         total_raw = sum(s.get('raw_tokens', 0) for s in self.project_stats.values())
         total_compressed = sum(s.get('compressed_tokens', 0) for s in self.project_stats.values())
         
         overall_ratio = (total_compressed / total_raw * 100) if total_raw > 0 else 0
         
+        # Update all UI elements immediately
         self.label_raw_tokens.setText(f"Total Raw Tokens\n{self._format_number(total_raw)}")
         self.label_compressed_tokens.setText(f"Compressed Tokens\n{self._format_number(total_compressed)}")
         self.label_compression_ratio.setText(f"Compression Ratio\n{overall_ratio:.1f}%")
@@ -222,6 +224,10 @@ class TokenDashboardWidget(QFrame):
         
         # Update table
         self._update_stats_table()
+        
+        # Force Qt to process pending events and update UI immediately
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
     
     def _update_stats_table(self):
         """Update the statistics table with project data."""

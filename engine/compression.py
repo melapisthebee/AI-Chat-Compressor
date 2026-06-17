@@ -18,13 +18,14 @@ from database.queries import get_project_knowledge, create_session_record, updat
 
 
 class CompressionEngine:
-    def __init__(self, streaming_processor: Optional[StreamingTokenProcessor] = None):
+    def __init__(self, streaming_processor: Optional[StreamingTokenProcessor] = None, stats_callback=None):
         """
         Initializes the compression engine client utilizing configured environment parameters
         loaded via Pydantic Settings. Assumes a running local instance of LM Studio.
         
         Args:
             streaming_processor: Optional custom streaming processor instance
+            stats_callback: Optional callback function called per chunk with (raw_tokens, compressed_tokens, ratio, chunks_processed)
         """
         self.client = OpenAI(
             base_url=settings.LM_STUDIO_BASE_URL,
@@ -33,6 +34,7 @@ class CompressionEngine:
         )
         self.streaming_processor = streaming_processor or StreamingTokenProcessor()
         self.token_budget_manager = TokenBudgetManager()
+        self.stats_callback = stats_callback
     
     def check_lm_studio_health(self) -> bool:
         """
@@ -204,7 +206,8 @@ class CompressionEngine:
                     {"role": "user", "content": json.dumps(user_payload, indent=2)}
                 ],
                 temperature=0.0,
-                response_format={"type": "text"}
+                response_format={"type": "text"},
+                extra_body={"prompt_quantization": "Q8_0"}
             )
             
             raw_content = response.choices[0].message.content.strip()
@@ -301,7 +304,8 @@ class CompressionEngine:
                     {"role": "user", "content": json.dumps(user_payload, indent=2)}
                 ],
                 temperature=0.0,
-                response_format={"type": "text"}
+                response_format={"type": "text"},
+                extra_body={"prompt_quantization": "Q8_0"}
             )
             
             return self._extract_json_from_response(response.choices[0].message.content)
@@ -468,9 +472,21 @@ class CompressionEngine:
             processing_stats['chunks_processed'] = chunk_index + 1
             processing_stats['total_tokens_processed'] += chunk_data['token_count']
             
-            # Check if we've exceeded the target token budget
+            # Calculate compressed token count for budget check and live stats
             compressed_summary_block = json.dumps(active_knowledge)
             current_compressed_tokens = tracker.count_tokens(compressed_summary_block)
+            
+            # Emit live stats callback for dashboard updates
+            if self.stats_callback:
+                ratio = (current_compressed_tokens / raw_token_count * 100) if raw_token_count > 0 else 0
+                self.stats_callback(
+                    raw_tokens=raw_token_count,
+                    compressed_tokens=current_compressed_tokens,
+                    ratio=ratio,
+                    chunks_processed=processing_stats['chunks_processed']
+                )
+            
+            # Check if we've exceeded the target token budget
             budget_reached = current_compressed_tokens >= self.streaming_processor.max_target_tokens
             
             return {
