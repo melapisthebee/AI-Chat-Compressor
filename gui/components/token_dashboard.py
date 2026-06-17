@@ -26,8 +26,7 @@ class TokenDashboardWidget(QFrame):
         super().__init__(parent)
         self.project_stats = {}  # Store stats per project
         self.setup_ui()
-        # Load persisted settings AFTER UI is created
-        self._load_persisted_settings()
+        # Settings will be loaded by TokenBudgetSettingsWidget when needed
     
     def setup_ui(self):
         """Initialize the dashboard UI components."""
