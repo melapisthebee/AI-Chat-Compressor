@@ -263,9 +263,6 @@ class MainWindow(QMainWindow):
         self.worker.error_signal.connect(self.handle_worker_error)
         self.worker.finished_signal.connect(self.handle_worker_success)
         
-        # MEMORY LEAK PREVENTION: Force C++ QThread object cleanup natively upon completion
-        self.worker.finished.connect(self.worker.deleteLater)
-        
         self.worker.start()
 
     def update_status(self, text: str):

@@ -41,20 +41,44 @@ class TokenDashboardWidget(QFrame):
         title_label.setStyleSheet("color: #8ae9fd; margin-bottom: 8px;")
         main_layout.addWidget(title_label)
         
-        # Summary Cards Layout
+        # Summary Labels Layout (Simplified: No QFrame wrappers)
         summary_layout = QGridLayout()
         summary_layout.setSpacing(8)
         
-        # Create summary cards (store both card frame and value_label)
-        self.card_raw_tokens, self.label_raw_tokens = self._create_summary_card("Total Raw Tokens", "0", "#3d3d3d")
-        self.card_compressed_tokens, self.label_compressed_tokens = self._create_summary_card("Compressed Tokens", "0", "#3d3d3d")
-        self.card_compression_ratio, self.label_compression_ratio = self._create_summary_card("Compression Ratio", "0%", "#3d3d3d")
-        self.card_avg_processing_time, self.label_avg_processing_time = self._create_summary_card("Avg Processing Time", "0s", "#3d3d3d")
+        # Style for summary labels
+        summary_style = """
+            QLabel {
+                background-color: #2d2d2d;
+                border-radius: 6px;
+                padding: 10px;
+                font-size: 13px;
+            }
+            .value { color: #8ae9fd; font-weight: bold; font-size: 20px; }
+            .title { color: #aaaaaa; font-size: 11px; }
+        """
+        self.setStyleSheet(summary_style)
+
+        # Create simple labels with titles and values
+        self.label_raw_tokens = QLabel("Total Raw Tokens\n0")
+        self.label_raw_tokens.setObjectName("value")
+        self.label_raw_tokens.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        summary_layout.addWidget(self.card_raw_tokens[0] if isinstance(self.card_raw_tokens, tuple) else self.card_raw_tokens, 0, 0)
-        summary_layout.addWidget(self.card_compressed_tokens[0] if isinstance(self.card_compressed_tokens, tuple) else self.card_compressed_tokens, 0, 1)
-        summary_layout.addWidget(self.card_compression_ratio[0] if isinstance(self.card_compression_ratio, tuple) else self.card_compression_ratio, 1, 0)
-        summary_layout.addWidget(self.card_avg_processing_time[0] if isinstance(self.card_avg_processing_time, tuple) else self.card_avg_processing_time, 1, 1)
+        self.label_compressed_tokens = QLabel("Compressed Tokens\n0")
+        self.label_compressed_tokens.setObjectName("value")
+        self.label_compressed_tokens.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.label_compression_ratio = QLabel("Compression Ratio\n0%")
+        self.label_compression_ratio.setObjectName("value")
+        self.label_compression_ratio.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.label_avg_processing_time = QLabel("Avg Processing Time\n0s")
+        self.label_avg_processing_time.setObjectName("value")
+        self.label_avg_processing_time.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        summary_layout.addWidget(self.label_raw_tokens, 0, 0)
+        summary_layout.addWidget(self.label_compressed_tokens, 0, 1)
+        summary_layout.addWidget(self.label_compression_ratio, 1, 0)
+        summary_layout.addWidget(self.label_avg_processing_time, 1, 1)
         
         main_layout.addLayout(summary_layout)
         
@@ -160,27 +184,7 @@ class TokenDashboardWidget(QFrame):
         button_layout.addStretch()
         main_layout.addLayout(button_layout)
     
-    def _create_summary_card(self, title: str, value: str, bg_color: str) -> tuple:
-        """Create a summary statistic card. Returns (card_frame, value_label)."""
-        card = QFrame()
-        card.setFrameShape(QFrame.Shape.StyledPanel)
-        card.setFrameShadow(QFrame.Shadow.Raised)
-        card.setStyleSheet(f"background-color: {bg_color}; border-radius: 8px; padding: 12px;")
-        
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 8, 12, 8)
-        
-        title_label = QLabel(title)
-        title_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(title_label)
-        
-        value_label = QLabel(value)
-        value_label.setStyleSheet("color: #8ae9fd; font-size: 20px; font-weight: bold;")
-        value_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(value_label)
-        
-        return card, value_label
+
     
     def update_dashboard(self, project_name: str, stats: dict):
         """
@@ -199,9 +203,9 @@ class TokenDashboardWidget(QFrame):
         
         overall_ratio = (total_compressed / total_raw * 100) if total_raw > 0 else 0
         
-        self.label_raw_tokens.setText(self._format_number(total_raw))
-        self.label_compressed_tokens.setText(self._format_number(total_compressed))
-        self.label_compression_ratio.setText(f"{overall_ratio:.1f}%")
+        self.label_raw_tokens.setText(f"Total Raw Tokens\n{self._format_number(total_raw)}")
+        self.label_compressed_tokens.setText(f"Compressed Tokens\n{self._format_number(total_compressed)}")
+        self.label_compression_ratio.setText(f"Compression Ratio\n{overall_ratio:.1f}%")
         
         # Update progress bar
         max_tokens = 10000  # Default budget
@@ -267,9 +271,10 @@ class TokenDashboardWidget(QFrame):
     def clear_dashboard(self):
         """Clear all dashboard data."""
         self.project_stats.clear()
-        self.label_raw_tokens.setText("0")
-        self.label_compressed_tokens.setText("0")
-        self.label_compression_ratio.setText("0%")
+        self.label_raw_tokens.setText("Total Raw Tokens\n0")
+        self.label_compressed_tokens.setText("Compressed Tokens\n0")
+        self.label_compression_ratio.setText("Compression Ratio\n0%")
+        self.label_avg_processing_time.setText("Avg Processing Time\n0s")
         self.budget_progress.setValue(0)
         self.stats_table.setRowCount(0)
 
