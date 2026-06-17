@@ -188,8 +188,15 @@ class MainWindow(QMainWindow):
         self.token_dashboard = TokenDashboardWidget()
         self.tab_widget.addTab(self.token_dashboard, "📊 Token Dashboard")
         
+        # Initialize dashboard with current settings after creation
+        from engine.streaming_processor import token_budget_manager
+        current_settings = token_budget_manager.get_current_settings()
+        self.token_dashboard.update_settings(current_settings)
+        
         # Tab 3: Settings
         self.settings_widget = TokenBudgetSettingsWidget()
+        # Connect settings changes to dashboard updates
+        self.settings_widget.settings_changed.connect(self.token_dashboard.update_settings)
         self.tab_widget.addTab(self.settings_widget, "⚙️ Token Settings")
         
         main_layout.addWidget(self.tab_widget, stretch=1)

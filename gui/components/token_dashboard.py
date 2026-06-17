@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QGridLayout, QScrollArea, QPushButton,
     QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QPalette, QColor
 
 
@@ -40,6 +40,10 @@ class TokenDashboardWidget(QFrame):
         title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         title_label.setStyleSheet("color: #8ae9fd; margin-bottom: 8px;")
         main_layout.addWidget(title_label)
+        
+        # Store reference to settings for live updates
+        self.settings = {}
+        self.budget_label = None  # Will be created in progress section
         
         # Summary Labels Layout (Simplified: No QFrame wrappers)
         summary_layout = QGridLayout()
@@ -104,9 +108,9 @@ class TokenDashboardWidget(QFrame):
         """)
         progress_layout.addWidget(self.budget_progress)
         
-        budget_label = QLabel("0 / 10000 tokens used")
-        budget_label.setStyleSheet("color: #888888; font-size: 11px;")
-        progress_layout.addWidget(budget_label)
+        self.budget_label = QLabel("0 / 10000 tokens used")
+        self.budget_label.setStyleSheet("color: #888888; font-size: 11px;")
+        progress_layout.addWidget(self.budget_label)
         
         main_layout.addWidget(progress_group)
         
@@ -207,10 +211,14 @@ class TokenDashboardWidget(QFrame):
         self.label_compressed_tokens.setText(f"Compressed Tokens\n{self._format_number(total_compressed)}")
         self.label_compression_ratio.setText(f"Compression Ratio\n{overall_ratio:.1f}%")
         
-        # Update progress bar
-        max_tokens = 10000  # Default budget
-        usage_percent = min((total_raw / max_tokens) * 100, 100)
+        # Update progress bar with current budget setting
+        max_tokens = self.settings.get('max_target_tokens', 10000) if self.settings else 10000
+        usage_percent = min((total_raw / max_tokens) * 100, 100) if max_tokens > 0 else 0
         self.budget_progress.setValue(int(usage_percent))
+        
+        # Update budget label to show current settings
+        if self.budget_label:
+            self.budget_label.setText(f"{total_raw} / {max_tokens:,} tokens used")
         
         # Update table
         self._update_stats_table()
@@ -271,20 +279,39 @@ class TokenDashboardWidget(QFrame):
     def clear_dashboard(self):
         """Clear all dashboard data."""
         self.project_stats.clear()
+        self.settings = {}
         self.label_raw_tokens.setText("Total Raw Tokens\n0")
         self.label_compressed_tokens.setText("Compressed Tokens\n0")
         self.label_compression_ratio.setText("Compression Ratio\n0%")
         self.label_avg_processing_time.setText("Avg Processing Time\n0s")
         self.budget_progress.setValue(0)
         self.stats_table.setRowCount(0)
+    
+    def update_settings(self, new_settings: dict):
+        """
+        Update dashboard when token settings change.
+        
+        Args:
+            new_settings: Dictionary with new token budget settings
+        """
+        self.settings = new_settings.copy()
+        # Refresh the progress bar calculation and label with new max tokens
+        total_raw = sum(s.get('raw_tokens', 0) for s in self.project_stats.values())
+        max_tokens = new_settings.get('max_target_tokens', 10000)
+        usage_percent = min((total_raw / max_tokens) * 100, 100) if max_tokens > 0 else 0
+        self.budget_progress.setValue(int(usage_percent))
+        if self.budget_label:
+            self.budget_label.setText(f"{total_raw} / {max_tokens:,} tokens used")
 
+
+from PyQt6.QtCore import pyqtSignal
 
 class TokenBudgetSettingsWidget(QFrame):
     """
     Widget for configuring token budget settings via UI.
     """
     
-    settings_changed = None  # Signal to emit when settings change
+    settings_changed = pyqtSignal(dict)  # Signal to emit when settings change
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -431,15 +458,18 @@ class TokenBudgetSettingsWidget(QFrame):
             self.validation_label.setStyleSheet("color: #4caf50;")
             
             # Update streaming processor with new settings
-            from engine.streaming_processor import streaming_processor
+            from engine.streaming_processor import streaming_processor, token_budget_manager
             streaming_processor.max_target_tokens = settings['max_target_tokens']
             streaming_processor.chunk_size_tokens = settings['chunk_size_tokens']
             streaming_processor.overlap_tokens = settings['overlap_tokens']
             streaming_processor.preserve_recent_tokens = settings['preserve_recent_tokens']
             
-            # Emit signal if connected
-            if self.settings_changed:
-                self.settings_changed(settings)
+            # Also update the budget manager
+            token_budget_manager.apply_settings(settings)
+            
+            # Emit signal to notify dashboard and other components
+            # The signal is already defined as pyqtSignal, just emit it once
+            self.settings_changed.emit(settings)
         else:
             self.validation_label.setText(f"❌ {error_msg}")
             self.validation_label.setStyleSheet("color: #f44336;")
