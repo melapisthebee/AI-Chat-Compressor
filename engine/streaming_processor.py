@@ -106,7 +106,7 @@ class StreamingTokenProcessor:
         while start < total_tokens:
             iteration_count += 1
             if iteration_count > max_iterations:
-                print(f"⚠️ Sliding window safety limit reached ({max_iterations} iterations), stopping to prevent infinite loop")
+                print(f"Sliding window safety limit reached ({max_iterations} iterations), stopping to prevent infinite loop")
                 break
                 
             end = min(start + chunk_size, total_tokens)
@@ -148,22 +148,22 @@ class StreamingTokenProcessor:
         
         # Quick token estimation for very large files
         estimated_tokens = self.estimate_file_tokens(text)
-        print(f"📊 Estimated file size: {estimated_tokens:,} tokens")
+        print(f"Estimated file size: {estimated_tokens:,} tokens")
         
         if estimated_tokens < self.chunk_size_tokens * 2:
             # File is small enough to process in one pass
             return self._process_small_file(text, process_chunk_callback)
         
         # Full tokenization for precise processing
-        print("🔄 Tokenizing full text...")
+        print("Tokenizing full text...")
         all_tokens = tracker.split_into_tokens(text)
         self.stats['total_raw_tokens'] = len(all_tokens)
-        print(f"✓ Tokenized {len(all_tokens):,} tokens")
+        print(f"Tokenized {len(all_tokens):,} tokens")
         
         results = []
         chunk_index = 0
         total_chunks = (len(all_tokens) // max(self.chunk_size_tokens - self.overlap_tokens, 1)) + 1
-        print(f"📋 Total chunks to process: ~{total_chunks}")
+        print(f"Total chunks to process: ~{total_chunks}")
         
         # Create sliding windows and process each chunk
         for start_idx, end_idx, chunk_tokens in self.create_sliding_windows(all_tokens):
@@ -172,7 +172,7 @@ class StreamingTokenProcessor:
             # Log progress every 5 chunks or on major milestones
             if chunk_index % 10 == 0 or chunk_index == total_chunks - 1:
                 percent = ((chunk_index + 1) / total_chunks) * 100
-                print(f"🔄 Progress: Chunk {chunk_index}/{total_chunks} ({percent:.1f}%)")
+                print(f"Progress: Chunk {chunk_index}/{total_chunks} ({percent:.1f}%)")
             
             # Prepare chunk data with context metadata
             chunk_data = {
@@ -190,7 +190,7 @@ class StreamingTokenProcessor:
             
             # Check for early termination if callback indicates budget reached
             if chunk_result and chunk_result.get('budget_reached', False):
-                print(f"🎯 Target token budget reached at chunk {chunk_index}, stopping early")
+                print(f"Target token budget reached at chunk {chunk_index}, stopping early")
                 break
             
             # Force garbage collection periodically for very large files

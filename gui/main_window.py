@@ -34,12 +34,12 @@ class CompressionWorker(QThread):
         try:
             self.progress_signal.emit("Parsing source conversation log export file...")
             messages = parse_lm_studio_file(self.filepath)
-            print(f"✓ Parsed {len(messages)} messages from file")
+            print(f"Parsed {len(messages)} messages from file")
             filename = os.path.basename(self.filepath)
             
             self.progress_signal.emit(f"Retrieving or constructing Project: '{self.project_name}'...")
             project = get_or_create_project(db, self.project_name)
-            print(f"✓ Project '{project.name}' (ID: {project.id}) ready")
+            print(f"Project '{project.name}' (ID: {project.id}) ready")
             
             self.progress_signal.emit("Running sliding token window synchronization loop through local LLM...")
             
@@ -57,7 +57,7 @@ class CompressionWorker(QThread):
             engine = CompressionEngine(stats_callback=_live_stats)
             
             # Runs the dynamic context synchronization with streaming support
-            print("\n🚀 Starting compression engine process_and_adapt()...")
+            print("\nStarting compression engine process_and_adapt()...")
             result = engine.process_and_adapt(db, project.id, messages, filename)
             
             # Handle both old and new return formats
@@ -65,7 +65,7 @@ class CompressionWorker(QThread):
                 updated_knowledge = result.get('knowledge', result)
                 dashboard_data = result.get('dashboard_data', {})
                 processing_stats = result.get('processing_stats', {})
-                print(f"\n✅ Process completed: {len(updated_knowledge)} knowledge categories")
+                print(f"\nProcess completed: {len(updated_knowledge)} knowledge categories")
                 if dashboard_data:
                     print(f"   Dashboard data: {dashboard_data}")
             else:
@@ -77,7 +77,7 @@ class CompressionWorker(QThread):
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n{traceback.format_exc()}"
-            print(f"❌ Worker thread failed: {error_detail}")
+            print(f"Worker thread failed: {error_detail}")
             self.error_signal.emit(str(e))
         finally:
             db.close()
@@ -253,12 +253,12 @@ class MainWindow(QMainWindow):
                 knowledge = get_project_knowledge(db, project.id)
                 if knowledge:
                     self.console_output.clear()
-                    self.console_output.append(f"📂 LOADED EXISTING SNAPSHOT FOR PROJECT: {project_name}\n")
+                    self.console_output.append(f"LOADED EXISTING SNAPSHOT FOR PROJECT: {project_name}\n")
                     self.console_output.append("--- CURRENT ADAPTIVE KNOWLEDGE CORE STATE ---")
                     self.console_output.append(json.dumps(knowledge, indent=2))
                 else:
                     self.console_output.clear()
-                    self.console_output.append(f"📂 Profile '{project_name}' is active but contains no historical records yet.")
+                    self.console_output.append(f"Profile '{project_name}' is active but contains no historical records yet.")
         finally:
             db.close()
 
@@ -299,10 +299,10 @@ class MainWindow(QMainWindow):
         self.token_dashboard.update_dashboard(project_name, stats_data)
         # Also update console with progress info
         if 'chunks' in stats_data and 'status' in stats_data:
-            self.console_output.append(f"\n📊 Live Stats: {stats_data['chunks']} chunks processed, Status: {stats_data['status']}")
+            self.console_output.append(f"\nLive Stats: {stats_data['chunks']} chunks processed, Status: {stats_data['status']}")
 
     def update_status(self, text: str):
-        self.console_output.append(f"⚙️ {text}")
+        self.console_output.append(f">> {text}")
 
     def handle_worker_error(self, err_message: str):
         """
@@ -310,7 +310,7 @@ class MainWindow(QMainWindow):
         - Non-critical errors: console output + status bar message
         - Critical errors: console output + helpful modal popup with retry option
         """
-        self.console_output.append(f"\n⚠️ Processing Interrupted:\n{err_message}\n")
+        self.console_output.append(f"\nProcessing Interrupted:\n{err_message}\n")
         
         # Determine error severity and show appropriate UI feedback
         critical_keywords = ["database", "permission denied", "connection failed",
@@ -337,7 +337,7 @@ class MainWindow(QMainWindow):
             # Check which button was clicked
             if msg_box.clickedButton() == retry_button:
                 # User wants to retry - reset UI and restart
-                self.console_output.append("\n🔄 Retrying operation...")
+                self.console_output.append("\nRetrying operation...")
                 self.reset_ui_controls()
                 # Re-trigger the file processing if possible
                 if hasattr(self, 'pending_filepath'):
@@ -402,7 +402,7 @@ class MainWindow(QMainWindow):
         self.set_status_indicator("SUCCESS")
         
         self.console_output.clear()
-        self.console_output.append(f"✅ SUCCESSFUL UPDATE STRATIFICATION FOR PROJECT: {project_name}\n")
+        self.console_output.append(f"SUCCESSFUL UPDATE STRATIFICATION FOR PROJECT: {project_name}\n")
         self.console_output.append("--- UPDATED ADAPTIVE KNOWLEDGE CORE STATE ---")
         
         pretty_json = json.dumps(final_knowledge, indent=2)
@@ -507,7 +507,7 @@ class MainWindow(QMainWindow):
                 break
         
         # Show a message that settings are available
-        self.console_output.append("\n💡 Token Budget Settings panel is now active.\n")
+        self.console_output.append("\nToken Budget Settings panel is now active.\n")
         self.console_output.append("Adjust chunk sizes, overlap, and token budgets as needed.\n")
 
     def closeEvent(self, event):
@@ -519,7 +519,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'worker') and self.worker is not None:
             try:
                 if self.worker.isRunning():
-                    self.console_output.append("\n⚠️ System shutting down: Halting background generation loop...")
+                    self.console_output.append("\nSystem shutting down: Halting background generation loop...")
                     self.worker.quit()
                     self.worker.wait(timeout=5000)  # Wait up to 5 seconds
             except RuntimeError:
