@@ -42,16 +42,20 @@ def retry_on_locked(max_retries: int = 3, base_delay: float = 0.5):
 def get_or_create_project(db: Session, project_name: str) -> Project:
     """
     Fetches a project by name, or creates it if it doesn't exist yet.
-    Thread-safe: Uses mutex lock around write operations.
+    Thread-safe: Locks only during write operations.
     """
-    with db_write_lock:
-        project = db.query(Project).filter(Project.name == project_name).first()
-        if not project:
+    # Read without lock (SQLite handles concurrent reads)
+    project = db.query(Project).filter(Project.name == project_name).first()
+    
+    if not project:
+        # Only lock when actually writing
+        with db_write_lock:
             project = Project(name=project_name)
             db.add(project)
             db.commit()
             db.refresh(project)
-        return project
+    
+    return project
 
 def list_all_projects(db: Session) -> List[Project]:
     """
@@ -77,19 +81,19 @@ def create_session_record(
 ) -> ChatSession:
     """
     Logs the metadata of an imported conversation file.
-    Thread-safe: Uses mutex lock around write operations.
+    Thread-safe: Locks only during write operations.
     """
+    session_record = ChatSession(
+        project_id=project_id,
+        filename=filename,
+        raw_token_count=raw_tokens,
+        compressed_token_count=compressed_tokens
+    )
     with db_write_lock:
-        session_record = ChatSession(
-            project_id=project_id,
-            filename=filename,
-            raw_token_count=raw_tokens,
-            compressed_token_count=compressed_tokens
-        )
         db.add(session_record)
         db.commit()
         db.refresh(session_record)
-        return session_record
+    return session_record
 
 @retry_on_locked(max_retries=3, base_delay=1.0)
 def update_adaptive_knowledge(
@@ -103,7 +107,7 @@ def update_adaptive_knowledge(
     The core adaptive engine routine. 
     Takes a dictionary of fresh knowledge chunks (native dict/JSON from LLM engine) 
     and updates existing categories or creates new ones.
-    Thread-safe: Uses mutex lock around all write operations to prevent race conditions.
+    Thread-safe: Locks only during write operations.
     
     CRITICAL GUARDRAIL: If the incoming update payload is completely empty, it is 
     treated as a model generation or truncation fault, and deletions are skipped 
@@ -125,27 +129,28 @@ def update_adaptive_knowledge(
             print("⏭️ Skipping database update (empty knowledge delta)")
             return True
             
-        # 1. Fetch current stored knowledge records for this project
-        with db_write_lock:
-            existing_records = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
-            existing_map = {record.category: record for record in existing_records}
-            
-            print(f"💾 Database update: Found {len(existing_map)} existing categories")
-            print(f"   Incoming update has {len(updated_knowledge)} categories")
+        # 1. Fetch current stored knowledge records (no lock needed for reads)
+        existing_records = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
+        existing_map = {record.category: record for record in existing_records}
         
+        print(f"💾 Database update: Found {len(existing_map)} existing categories")
+        print(f"   Incoming update has {len(updated_knowledge)} categories")
+    
+        # Lock only for write operations
+        with db_write_lock:
             # 2. Process updates and additions
             added_count = 0
             updated_count = 0
             for category, fresh_content in updated_knowledge.items():
                 if category in existing_map:
-                    # Overwrite content if it changed (SQLAlchemy detects internal dict modifications)
+                    # Overwrite content if it changed
                     record = existing_map[category]
                     record.content = fresh_content
                     record.last_updated_by_session_id = session_id
                     record.updated_at = datetime.utcnow()
                     updated_count += 1
                 else:
-                    # Create a brand new knowledge segment storing native JSON/dict
+                    # Create a brand new knowledge segment
                     new_record = KnowledgeCore(
                         project_id=project_id,
                         category=category,
@@ -167,11 +172,9 @@ def update_adaptive_knowledge(
                         should_delete = True
                         if raw_context_stream:
                             normalized_stream = raw_context_stream.lower()
-                            # Extract alphanumeric keyword parts (e.g., "database_layer" -> ["database", "layer"])
                             keywords = re.findall(r'\w+', category.lower())
                             
-                            # If descriptive category keys were completely absent from the processed text chunk,
-                            # the file simply didn't contain info on this domain. Skip deletion to protect state.
+                            # If descriptive category keys were completely absent, skip deletion
                             if keywords and not any(kw in normalized_stream for kw in keywords):
                                 should_delete = False
                         
@@ -181,7 +184,7 @@ def update_adaptive_knowledge(
             
             print(f"   ✓ Deleted {deleted_count} obsolete categories")
             
-            # 4. Touch the project timestamp to show it was modified
+            # 4. Touch the project timestamp
             project = db.query(Project).filter(Project.id == project_id).first()
             if project:
                 project.updated_at = datetime.utcnow()
