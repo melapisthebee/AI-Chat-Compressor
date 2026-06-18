@@ -26,14 +26,6 @@
 <a href="https://github.com/melapisthebee/AI-Chat-Compressor/issues">Issues</a> · 
 <a href="#contributors">Contributors</a>
 
-👋 Join our Community
-
-💬 <a href="https://discord.gg/your-invite">Discord</a> · 
-🐦 <a href="https://x.com/melapisthebee">X / Twitter</a> · 
-⬇️ <a href="#quick-start">Quick Start</a>
-
-<a href="https://github.com/trending" target="_blank"><img src="https://trendshift.io/api/badge/repositories/19668" alt="melapisthebee/AI-Chat-Compressor | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-
 </div>
 
 ***
