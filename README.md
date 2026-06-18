@@ -1,13 +1,3 @@
-<div align="center">
-
-<a href="https://github.com/melapisthebee/AI-Chat-Compressor">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
-  </picture>
-</a>
-
 ### AI Chat Compressor: Keeping The Key Ideas, Without The Bloat
 
 </div>
@@ -38,23 +28,79 @@ With lm-compressor, developers can:
 
 ## Quick Start
 
-### Local Deployment
-
 #### Prerequisites
 
 Before starting with lm-compressor, please ensure your environment meets the following requirements:
 
-- **Python Version**: 3.10 or higher
+- **Python Version**: 3.12 supported. 
 - **Operating System**: Windows, macOS, Linux
 - **Network Connection**: A stable network connection is required (for downloading dependencies. Afterwards you can go completely offline)
 
-#### 1. Installation
+### 1. Installation
 
-##### Python Package
+#### Install the Python interpeter:
 
+##### Windows
 ```bash
-pip install lm-compressor --upgrade --force-reinstall
+# Install the latest Python 3 with pip included
+winget install Python.Python.3.12
+
+# Verify installation
+python --version
 ```
+
+##### MacOS
+```bash
+# Install Homebrew if not already installed
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install Python 3 (includes pip)
+brew install python
+
+# Verify installation
+python3 --version
+pip3 --version
+```
+
+##### Arch Linux
+```bash
+# Update package database
+sudo pacman -Syu
+
+# Install Python (includes pip as python-pip)
+sudo pacman -S python python-pip
+
+# Verify installation
+python --version
+pip --version
+```
+
+##### Fedora Linux
+```bash
+# Update system
+sudo dnf update
+
+# Install Python 3, pip, and development tools
+sudo dnf install python3 python3-pip python3-devel
+
+# Verify installation
+python3 --version
+pip3 --version
+```
+
+##### Debain/Ubuntu Linux
+```bash
+# Update package list
+sudo apt update
+
+# Install Python 3, pip, and the python-is-python3 package
+sudo apt install python3 python3-pip python-is-python3
+
+# Verify installation
+python --version
+pip --version
+```
+
 
 ##### Virtual Environment Setup
 
@@ -64,7 +110,7 @@ python -m venv .venv
 
 # Activate the virtual environment
 # Windows PowerShell:
-.venv\Scripts\Activate.ps1
+./.venv/Scripts/activate
 
 # macOS/Linux:
 source .venv/bin/activate
@@ -96,20 +142,6 @@ pip install -r requirements.txt
 # Run the application inside the virtual environment
 python app.py
 ```
-
-## How To Run
-
-Operating the project is straightforward:
-
-1. **Ensure the venv is active** (see above)
-2. **Launch the application** and ensure it starts without errors
-3. **Type the name of a project** or click on a previously made project in the interface
-4. **Drag and drop** a `.md`, `.txt`, `.json`, or `.pdf` file into the top window
-5. The program will automatically start the compression process
-6. Once finished, click the **"Copy Context State"** button to retrieve your compressed data
-7. You can choose not to copy it and close the program due to the existence of the database at `./storage/`
-
-**⚠️ Important**: Deleting the `.db` file in the `./storage/` directory will wipe all projects, so be cautious!
 
 ***
 
@@ -154,6 +186,18 @@ This is for everyone's benefit. You get to Vibe-Code, so we get to verify.
 
 ### Q: Where can I report bugs or request new features?
 **A**: Please use the [GitHub Issues](https://github.com/melapisthebee/AI-Chat-Compressor/issues) page. Be sure to include detailed information about your setup, steps to reproduce, and expected behavior!
+
+***
+
+<div align="center">
+
+<a href="https://github.com/melapisthebee/AI-Chat-Compressor">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
+  </picture>
+</a>
 
 ***
 
