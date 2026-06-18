@@ -4,6 +4,12 @@ Parser Module - File Type-Specific Parsing Factory
 This module provides a factory pattern for parsing different file types.
 Each file format (.json, .txt, .md, .pdf) has its own dedicated parser class
 with specialized logic for handling that format's characteristics.
+
+Features:
+    - Format-specific parsers (JSON, TXT, Markdown, PDF)
+    - Schema-guided recovery for malformed JSON files
+    - File size validation (max 50MB or 200k tokens)
+    - Performance benchmarking utilities
 """
 
 import os
@@ -14,20 +20,12 @@ from .json_parser import JSONParser
 from .txt_parser import TXTParser
 from .markdown_parser import MarkdownParser
 from .pdf_parser import PDFParser
-
-
-# Registry of available parsers by file extension
-PARSER_REGISTRY: Dict[str, type] = {
-    '.json': JSONParser,
-    '.txt': TXTParser,
-    '.md': MarkdownParser,
-    '.pdf': PDFParser,
-}
+from .benchmark import ParserBenchmark, run_parser_benchmarks
 
 
 def get_parser_for_file(filepath: str) -> BaseParser:
     """
-    Factory function to retrieve the appropriate parser for a given file.
+    Get the appropriate parser for a given file based on its extension.
     
     Args:
         filepath: Path to the file to be parsed
@@ -40,11 +38,16 @@ def get_parser_for_file(filepath: str) -> BaseParser:
     """
     ext = os.path.splitext(filepath)[1].lower()
     
-    if ext not in PARSER_REGISTRY:
-        raise ValueError(f"Unsupported file format: {ext}. Supported formats: {list(PARSER_REGISTRY.keys())}")
-    
-    parser_class = PARSER_REGISTRY[ext]
-    return parser_class()
+    if ext == '.json':
+        return JSONParser()
+    elif ext == '.txt':
+        return TXTParser()
+    elif ext == '.md':
+        return MarkdownParser()
+    elif ext == '.pdf':
+        return PDFParser()
+    else:
+        raise ValueError(f"Unsupported file format: {ext}")
 
 
 def parse_lm_studio_file(filepath: str) -> List[Dict[str, str]]:
@@ -63,12 +66,6 @@ def parse_lm_studio_file(filepath: str) -> List[Dict[str, str]]:
         FileNotFoundError: If file does not exist
         Various parsing exceptions from specific parser implementations
     """
-    ext = os.path.splitext(filepath)[1].lower()
-    
-    if ext not in PARSER_REGISTRY:
-        raise ValueError(f"Unsupported file format: {ext}. Supported formats: {list(PARSER_REGISTRY.keys())}")
-    
-    # Use factory to get the appropriate parser instance
     parser = get_parser_for_file(filepath)
     
     # Each parser has its own parse method with different signatures
@@ -95,4 +92,6 @@ __all__ = [
     'TXTParser',
     'MarkdownParser',
     'PDFParser',
+    'ParserBenchmark',
+    'run_parser_benchmarks',
 ]

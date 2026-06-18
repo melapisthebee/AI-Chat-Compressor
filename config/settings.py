@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     WINDOW_WIDTH: int = 1000
     WINDOW_HEIGHT: int = 700
     
+    # --- API Configuration ---
+    REQUEST_TIMEOUT: int = 120  # Timeout in seconds for LLM API calls (increased for large conversations)
+    MAX_RETRIES: int = 3  # Maximum retry attempts for transient failures
+    RETRY_BASE_DELAY: int = 1  # Base delay in seconds between retries
+    
     # Allow overriding configurations cleanly via a local .env file at project root
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

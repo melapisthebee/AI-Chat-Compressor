@@ -6,6 +6,7 @@ __pycache__/
 # Database and Storage local files
 storage/archive.db
 *.json
+*.log
 
 # IDE config files
 .vscode/
