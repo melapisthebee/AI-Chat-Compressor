@@ -11,10 +11,11 @@ Displays compression metrics and token statistics per project:
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QProgressBar, QGridLayout, QScrollArea, QPushButton,
-    QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
+    QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QSpinBox, QApplication, QMessageBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QPalette, QColor
+from PyQt6.QtGui import QFont, QColor
 
 
 class TokenDashboardWidget(QFrame):
@@ -25,8 +26,9 @@ class TokenDashboardWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.project_stats = {}  # Store stats per project
+        self.settings = {}
+        self.budget_label = None
         self.setup_ui()
-        # Settings will be loaded by TokenBudgetSettingsWidget when needed
     
     def setup_ui(self):
         """Initialize the dashboard UI components."""
@@ -42,15 +44,10 @@ class TokenDashboardWidget(QFrame):
         title_label.setStyleSheet("color: #8ae9fd; margin-bottom: 8px;")
         main_layout.addWidget(title_label)
         
-        # Store reference to settings for live updates
-        self.settings = {}
-        self.budget_label = None  # Will be created in progress section
-        
-        # Summary Labels Layout (Simplified: No QFrame wrappers)
+        # Summary Labels Layout
         summary_layout = QGridLayout()
         summary_layout.setSpacing(8)
         
-        # Style for summary labels
         summary_style = """
             QLabel {
                 background-color: #2d2d2d;
@@ -59,11 +56,9 @@ class TokenDashboardWidget(QFrame):
                 font-size: 13px;
             }
             .value { color: #8ae9fd; font-weight: bold; font-size: 20px; }
-            .title { color: #aaaaaa; font-size: 11px; }
         """
         self.setStyleSheet(summary_style)
 
-        # Create simple labels with titles and values
         self.label_raw_tokens = QLabel("Total Raw Tokens\n0")
         self.label_raw_tokens.setObjectName("value")
         self.label_raw_tokens.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -76,7 +71,7 @@ class TokenDashboardWidget(QFrame):
         self.label_compression_ratio.setObjectName("value")
         self.label_compression_ratio.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        self.label_avg_processing_time = QLabel("Avg Processing Time\n0s")
+        self.label_avg_processing_time = QLabel("Avg Processing Time\n0.00s")
         self.label_avg_processing_time.setObjectName("value")
         self.label_avg_processing_time.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
@@ -101,6 +96,7 @@ class TokenDashboardWidget(QFrame):
                 border: 1px solid #3d3d3d;
                 border-radius: 4px;
                 text-align: center;
+                color: #ffffff;
             }
             QProgressBar::chunk {
                 background-color: #4caf50;
@@ -109,7 +105,7 @@ class TokenDashboardWidget(QFrame):
         """)
         progress_layout.addWidget(self.budget_progress)
         
-        self.budget_label = QLabel("0 / 10000 tokens used")
+        self.budget_label = QLabel("0 / 10,000 tokens used")
         self.budget_label.setStyleSheet("color: #888888; font-size: 11px;")
         progress_layout.addWidget(self.budget_label)
         
@@ -146,7 +142,6 @@ class TokenDashboardWidget(QFrame):
             }
         """)
         table_layout.addWidget(self.stats_table)
-        
         main_layout.addWidget(table_group)
         
         # Action Buttons
@@ -154,24 +149,19 @@ class TokenDashboardWidget(QFrame):
         
         refresh_btn = QPushButton("🔄 Refresh")
         refresh_btn.clicked.connect(self.refresh_dashboard)
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #212121;
-                color: #ffffff;
-                border: 1px solid #3d3d3d;
-                border-radius: 4px;
-                padding: 6px 12px;
-            }
-            QPushButton:hover {
-                background-color: #333333;
-                border: 1px solid #555555;
-            }
-        """)
+        refresh_btn.setStyleSheet(self._button_style())
         button_layout.addWidget(refresh_btn)
         
         export_btn = QPushButton("💾 Export Stats")
         export_btn.clicked.connect(self.export_statistics)
-        export_btn.setStyleSheet("""
+        export_btn.setStyleSheet(self._button_style())
+        button_layout.addWidget(export_btn)
+        
+        button_layout.addStretch()
+        main_layout.addLayout(button_layout)
+
+    def _button_style(self) -> str:
+        return """
             QPushButton {
                 background-color: #212121;
                 color: #ffffff;
@@ -183,51 +173,33 @@ class TokenDashboardWidget(QFrame):
                 background-color: #333333;
                 border: 1px solid #555555;
             }
-        """)
-        button_layout.addWidget(export_btn)
-        
-        button_layout.addStretch()
-        main_layout.addLayout(button_layout)
-    
-
+        """
     
     def update_dashboard(self, project_name: str, stats: dict):
-        """
-        Update dashboard with new statistics for a project.
-        
-        Args:
-            project_name: Name of the project
-            stats: Dictionary with statistics (raw_tokens, compressed_tokens, ratio, etc.)
-        """
-        # Store project stats (overwrite previous stats for this project)
+        """Update dashboard with new statistics for a project."""
         self.project_stats[project_name] = stats
         
-        # Force update the UI - called from worker thread via signal, ensures main thread execution
-        # Update summary cards
         total_raw = sum(s.get('raw_tokens', 0) for s in self.project_stats.values())
         total_compressed = sum(s.get('compressed_tokens', 0) for s in self.project_stats.values())
-        
         overall_ratio = (total_compressed / total_raw * 100) if total_raw > 0 else 0
         
-        # Update all UI elements immediately
+        # Calculate active average processing time across operations safely
+        valid_times = [float(s['processing_time']) for s in self.project_stats.values() if 'processing_time' in s]
+        avg_time = sum(valid_times) / len(valid_times) if valid_times else 0.0
+        
         self.label_raw_tokens.setText(f"Total Raw Tokens\n{self._format_number(total_raw)}")
         self.label_compressed_tokens.setText(f"Compressed Tokens\n{self._format_number(total_compressed)}")
         self.label_compression_ratio.setText(f"Compression Ratio\n{overall_ratio:.1f}%")
+        self.label_avg_processing_time.setText(f"Avg Processing Time\n{avg_time:.2f}s")
         
-        # Update progress bar with current budget setting
-        max_tokens = self.settings.get('max_target_tokens', 10000) if self.settings else 10000
+        max_tokens = self.settings.get('max_target_tokens', 10000)
         usage_percent = min((total_raw / max_tokens) * 100, 100) if max_tokens > 0 else 0
         self.budget_progress.setValue(int(usage_percent))
         
-        # Update budget label to show current settings
         if self.budget_label:
-            self.budget_label.setText(f"{total_raw} / {max_tokens:,} tokens used")
+            self.budget_label.setText(f"{total_raw:,} / {max_tokens:,} tokens used")
         
-        # Update table
         self._update_stats_table()
-        
-        # Force Qt to process pending events and update UI immediately
-        from PyQt6.QtWidgets import QApplication
         QApplication.processEvents()
     
     def _update_stats_table(self):
@@ -242,20 +214,21 @@ class TokenDashboardWidget(QFrame):
             ratio = stats.get('ratio', 0)
             ratio_item = QTableWidgetItem(f"{ratio:.1f}%")
             if ratio < 30:
-                ratio_item.setForeground(QColor("#4caf50"))  # Green for good compression
+                ratio_item.setForeground(QColor("#4caf50"))
             elif ratio < 60:
-                ratio_item.setForeground(QColor("#ff9800"))  # Orange for moderate
+                ratio_item.setForeground(QColor("#ff9800"))
             else:
-                ratio_item.setForeground(QColor("#f44336"))  # Red for poor
+                ratio_item.setForeground(QColor("#f44336"))
             self.stats_table.setItem(row, 3, ratio_item)
             
             self.stats_table.setItem(row, 4, QTableWidgetItem(str(stats.get('chunks', 0))))
             
-            # Status
             status = stats.get('status', 'Active')
             status_item = QTableWidgetItem(status)
-            if status == 'Active':
+            if status in ('Active', 'Complete'):
                 status_item.setForeground(QColor("#4caf50"))
+            elif status == 'Processing':
+                status_item.setForeground(QColor("#00bfff"))
             self.stats_table.setItem(row, 5, status_item)
     
     def _format_number(self, num: int) -> str:
@@ -264,19 +237,13 @@ class TokenDashboardWidget(QFrame):
             return f"{num / 1000000:.1f}M"
         elif num >= 1000:
             return f"{num / 1000:.1f}K"
-        else:
-            return str(num)
+        return str(num)
     
     def refresh_dashboard(self):
-        """Refresh the dashboard display."""
-        # This would typically reload data from database
         self._update_stats_table()
     
     def export_statistics(self):
-        """Export statistics to a file."""
-        # Placeholder for export functionality
-        from PyQt6.QtWidgets import QMessageBox
-        msg = QMessageBox()
+        msg = QMessageBox(self)
         msg.setWindowTitle("Export Statistics")
         msg.setText("Statistics export functionality coming soon!")
         msg.setIcon(QMessageBox.Icon.Information)
@@ -284,75 +251,54 @@ class TokenDashboardWidget(QFrame):
         msg.exec()
     
     def clear_dashboard(self):
-        """Clear all dashboard data."""
         self.project_stats.clear()
-        self.settings = {}
         self.label_raw_tokens.setText("Total Raw Tokens\n0")
         self.label_compressed_tokens.setText("Compressed Tokens\n0")
         self.label_compression_ratio.setText("Compression Ratio\n0%")
-        self.label_avg_processing_time.setText("Avg Processing Time\n0s")
+        self.label_avg_processing_time.setText("Avg Processing Time\n0.00s")
         self.budget_progress.setValue(0)
         self.stats_table.setRowCount(0)
     
     def update_settings(self, new_settings: dict):
-        """
-        Update dashboard when token settings change.
-        
-        Args:
-            new_settings: Dictionary with new token budget settings
-        """
         self.settings = new_settings.copy()
-        # Refresh the progress bar calculation and label with new max tokens
         total_raw = sum(s.get('raw_tokens', 0) for s in self.project_stats.values())
         max_tokens = new_settings.get('max_target_tokens', 10000)
         usage_percent = min((total_raw / max_tokens) * 100, 100) if max_tokens > 0 else 0
         self.budget_progress.setValue(int(usage_percent))
         if self.budget_label:
-            self.budget_label.setText(f"{total_raw} / {max_tokens:,} tokens used")
+            self.budget_label.setText(f"{total_raw:,} / {max_tokens:,} tokens used")
 
-
-from PyQt6.QtCore import pyqtSignal
 
 class TokenBudgetSettingsWidget(QFrame):
-    """
-    Widget for configuring token budget settings via UI.
-    """
+    """Widget for configuring token budget settings via UI."""
     
-    settings_changed = pyqtSignal(dict)  # Signal to emit when settings change
+    settings_changed = pyqtSignal(dict)
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setup_ui()
-        # Load persisted settings AFTER UI is created
         self._load_persisted_settings()
     
     def _load_persisted_settings(self):
-        """
-        Load token budget settings from persistent storage and apply to UI controls.
-        """
         try:
             from engine.streaming_processor import load_settings_from_file, streaming_processor, token_budget_manager
             saved_settings = load_settings_from_file()
             if saved_settings:
-                # Apply saved settings to UI controls
                 self.max_tokens_input.setValue(saved_settings.get('max_target_tokens', 10000))
                 self.chunk_size_input.setValue(saved_settings.get('chunk_size_tokens', 8000))
                 self.overlap_input.setValue(saved_settings.get('overlap_tokens', 2000))
                 self.preserve_input.setValue(saved_settings.get('preserve_recent_tokens', 5000))
-                # Update global instances
+                
                 streaming_processor.max_target_tokens = saved_settings.get('max_target_tokens', 10000)
                 streaming_processor.chunk_size_tokens = saved_settings.get('chunk_size_tokens', 8000)
                 streaming_processor.overlap_tokens = saved_settings.get('overlap_tokens', max(500, int(8000 * 0.10)))
                 streaming_processor.preserve_recent_tokens = saved_settings.get('preserve_recent_tokens', 5000)
-                # Update the token budget manager
+                
                 token_budget_manager.apply_settings(saved_settings)
-                print(f"✓ Loaded persisted token settings from file")
         except Exception as e:
             print(f"⚠️ Error loading persisted settings: {e}")
-            # Fall back to defaults
     
     def setup_ui(self):
-        """Initialize the settings UI."""
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setFrameShadow(QFrame.Shadow.Raised)
         self.setStyleSheet("background-color: #1e1e1e; border-radius: 8px; padding: 12px;")
@@ -360,7 +306,6 @@ class TokenBudgetSettingsWidget(QFrame):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
         
-        # Title
         title_label = QLabel("⚙️ Token Budget Settings")
         title_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
         title_label.setStyleSheet("color: #8ae9fd;")
@@ -449,16 +394,13 @@ class TokenBudgetSettingsWidget(QFrame):
             }
         """)
         button_layout.addWidget(reset_btn)
-        
         layout.addLayout(button_layout)
         
-        # Validation message
         self.validation_label = QLabel("")
         self.validation_label.setStyleSheet("color: #f44336; font-size: 11px;")
         layout.addWidget(self.validation_label)
     
     def _input_style(self) -> str:
-        """Return consistent input field styling."""
         return """
             QSpinBox {
                 background-color: #2d2d2d;
@@ -475,43 +417,36 @@ class TokenBudgetSettingsWidget(QFrame):
         """
     
     def _apply_settings(self):
-        """Apply current settings and validate."""
-        settings = {
+        current_settings = {
             'max_target_tokens': self.max_tokens_input.value(),
             'chunk_size_tokens': self.chunk_size_input.value(),
             'overlap_tokens': self.overlap_input.value(),
             'preserve_recent_tokens': self.preserve_input.value()
         }
         
-        # Validate
         from engine.streaming_processor import token_budget_manager, streaming_processor, save_settings_to_file
-        is_valid, error_msg = token_budget_manager.validate_settings(settings)
+        is_valid, error_msg = token_budget_manager.validate_settings(current_settings)
         
         if is_valid:
             self.validation_label.setText("✓ Settings applied successfully!")
             self.validation_label.setStyleSheet("color: #4caf50;")
             
-            # Update streaming processor with new settings
-            streaming_processor.max_target_tokens = settings['max_target_tokens']
-            streaming_processor.chunk_size_tokens = settings['chunk_size_tokens']
-            streaming_processor.overlap_tokens = settings['overlap_tokens']
-            streaming_processor.preserve_recent_tokens = settings['preserve_recent_tokens']
+            streaming_processor.max_target_tokens = current_settings['max_target_tokens']
+            streaming_processor.chunk_size_tokens = current_settings['chunk_size_tokens']
+            streaming_processor.overlap_tokens = current_settings['overlap_tokens']
+            streaming_processor.preserve_recent_tokens = current_settings['preserve_recent_tokens']
             
-            # Also update the budget manager
-            token_budget_manager.apply_settings(settings)
+            token_budget_manager.apply_settings(current_settings)
             
-            # Save settings to file for persistence
-            if save_settings_to_file(settings):
-                self.validation_label.setText("✓ Settings applied and saved!")
+            if save_settings_to_file(current_settings):
+                self.validation_label.setText("✓ Settings applied and saved permanently!")
             
-            # Emit signal to notify dashboard and other components
-            self.settings_changed.emit(settings)
+            self.settings_changed.emit(current_settings)
         else:
             self.validation_label.setText(f"❌ {error_msg}")
             self.validation_label.setStyleSheet("color: #f44336;")
     
     def _reset_defaults(self):
-        """Reset all settings to defaults."""
         from engine.streaming_processor import token_budget_manager
         defaults = token_budget_manager.reset_to_defaults()
         
@@ -522,16 +457,3 @@ class TokenBudgetSettingsWidget(QFrame):
         
         self.validation_label.setText("✓ Settings reset to defaults")
         self.validation_label.setStyleSheet("color: #4caf50;")
-    
-    def get_current_settings(self) -> dict:
-        """Get current settings as dictionary."""
-        return {
-            'max_target_tokens': self.max_tokens_input.value(),
-            'chunk_size_tokens': self.chunk_size_input.value(),
-            'overlap_tokens': self.overlap_input.value(),
-            'preserve_recent_tokens': self.preserve_input.value()
-        }
-
-
-# Import required widgets
-from PyQt6.QtWidgets import QSpinBox
