@@ -121,9 +121,9 @@ source .venv/bin/activate
 Create a `.env` file in the project's root directory with your LM Studio URL, API Token, and Model of choice:
 
 ```ini
-LM_STUDIO_URL=https://localhost:1234/v1
-LM_STUDIO_API_TOKEN=your-api-token
-LM_STUDIO_MODEL=your-preferred-model
+LM_STUDIO_BASE_URL=https://localhost:1234/v1
+LM_STUDIO_API_KEY=your-api-token
+DEFAULT_COMPRESSION_MODEL=your-preferred-model
 ```
 
 #### 3. Environment Validation
