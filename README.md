@@ -26,7 +26,7 @@ In the age of AI-powered assistants, conversations generate massive amounts of c
 
 ### The Solution
 
-**AI Chat Compressor** (shortened to "lm-compressor") was built specifically for LM Studio and similar AI platforms. It compresses large conversations from `.txt`, `.pdf`, `.md`, and `.json` files into significantly smaller, high-quality, structurally-based JSON stored inside a manipulatable SQLite database file.
+**AI Chat Compressor** (shortened to "lm-compressor") was built specifically to address these issues. It compresses large conversations from `.txt`, `.pdf`, `.md`, and `.json` files into significantly smaller, high-quality, structurally-based JSON stored inside a manipulatable SQLite database file.
 
 With lm-compressor, developers can:
 
@@ -46,7 +46,7 @@ Before starting with lm-compressor, please ensure your environment meets the fol
 
 - **Python Version**: 3.10 or higher
 - **Operating System**: Windows, macOS, Linux
-- **Network Connection**: A stable network connection is required (for downloading dependencies and accessing model services)
+- **Network Connection**: A stable network connection is required (for downloading dependencies. Afterwards you can go completely offline)
 
 #### 1. Installation
 
@@ -146,8 +146,11 @@ This is for everyone's benefit. You get to Vibe-Code, so we get to verify.
 ### Q: How do I ensure my compressed data is not lost if the database file gets corrupted?
 **A**: Always keep a backup of your `.db` file in a separate location. The compressed data is stored exclusively within this database, so losing it means losing your projects.
 
-### Q: Can LM Compressor handle very large conversation files (e.g., 10k+ messages)?
-**A**: Yes! However, for optimal performance and key idea retention, we recommend splitting extremely large conversations into logical chunks before processing them with LM Compressor.
+### Q: Can LM Compressor handle very large conversation files (e.g., 64k+ messages)?
+**A**: Yes! Do note that the larger the conversation, the longer the processing will take. 
+
+### Q: What model is reccomended for this project? 
+**A**: I reccomend you use "qwen3-4b-instruct-2507", which you can download from LM Studio. 
 
 ### Q: Where can I report bugs or request new features?
 **A**: Please use the [GitHub Issues](https://github.com/melapisthebee/AI-Chat-Compressor/issues) page. Be sure to include detailed information about your setup, steps to reproduce, and expected behavior!
