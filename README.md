@@ -10,27 +10,9 @@
 
 ### AI Chat Compressor: Keeping The Key Ideas, Without The Bloat
 
-<a href="https://github.com/melapisthebee/AI-Chat-Compressor">
-  <img alt="GitHub" src="https://img.shields.io/github/stars/melapisthebee/AI-Chat-Compressor?labelColor=2386f6&style=flat-square" />
-</a>
-<a href="https://pypi.org/project/lm-compressor/">
-  <img alt="PyPI - Downloads" src="https://img.shields.io/pypi/dm/lm-compressor?labelColor=0db7ed&style=flat-square" />
-</a>
-<a href="https://github.com/melapisthebee/AI-Chat-Compressor/releases/latest">
-  <img alt="Latest Release" src="https://img.shields.io/github/v/release/melapisthebee/AI-Chat-Compressor?labelColor=2386f6&style=flat-square" />
-</a>
-<a href="https://github.com/melapisthebee/AI-Chat-Compressor/blob/main/GNU-AGPL-3.0.md">
-  <img alt="License" src="https://img.shields.io/badge/license-AGPLv3-white?labelColor=2386f6&style=flat-square" />
-</a>
-<a href="https://pypi.org/project/lm-compressor/">Python</a> · 
-<a href="https://github.com/melapisthebee/AI-Chat-Compressor/issues">Issues</a> · 
-<a href="#contributors">Contributors</a>
-
 </div>
 
 ***
-
-✨ **Latest Update**: Check out our [Evaluation Highlights](#evaluation-highlights) to see how AI Chat Compressor improves conversation quality and compression efficiency.
 
 ## Overview
 
@@ -112,7 +94,7 @@ pip install -r requirements.txt
 
 ```bash
 # Run the application inside the virtual environment
-python lm_compressor.py
+python app.py
 ```
 
 ## How To Run
@@ -128,138 +110,6 @@ Operating the project is straightforward:
 7. You can choose not to copy it and close the program due to the existence of the database at `./storage/`
 
 **⚠️ Important**: Deleting the `.db` file in the `./storage/` directory will wipe all projects, so be cautious!
-
-## Evaluation Highlights
-
-AI Chat Compressor has been evaluated across multiple scenarios: long-conversation compression efficiency, key idea retention accuracy, and retrieval effectiveness.
-
-### 1. Compression Efficiency on Long Conversations
-
-| Method | Compression Rate | Key Idea Retention | Latency |
-|:-----------:|---------:|----------------:|-------------------:|
-| Naive truncation | 45% | 22.30% | 95.14s |
-| LM Compressor | **85%** | **82.08%** | 38.8s |
-| Semantic chunking | 67% | 33.38% | 82.4s |
-| Hierarchical memory | 71% | 57.21% | 49.1s |
-
-#### 1.1 Key Efficiency Improvements
-
-| Metric | Naive Truncation | LM Compressor | Improvement |
-|:-----:|-----------------:|--------------:|------------:|
-| Retention Rate | 22.30% → 82.08% (+3.39×) | -59.22% | **-91.0%** |
-| Processing Time | -56.47% | -34.3% | -63.2% |
-| Database Size | 45MB → 12.8MB (-71.8×) | -59.22% | -91.0% |
-
-### 2. Agent Context Performance on Test Scenarios
-
-For multi-turn agent tasks, LM Compressor's context extraction improves task success in both information retrieval and decision-making domains:
-
-| Setting | Retention Accuracy | Information Retrieval |
-|:-------:|----------------:|-----------------:|
-| LLM without compression | 70.94% | 54.38% |
-| LLM + LM Compressor context | **77.81%** (+6.87pp) | **66.25%** (+11.87pp) |
-
-### 3. Knowledge Base QA on Multi-Hop Queries
-
-On multi-hop RAG tasks from HotpotQA, increasing LM Compressor retrieval from top-5 to top-20 delivers the highest accuracy while keeping retrieval latency low:
-
-| Method | Retrieval Pattern | Accuracy | Tokens / Query |
-|:------:|:-----------------:|---------:|------------:|
-| Naive RAG | Vector retrieval | 62.50% | 1,290 |
-| HippoRAG 2 | Vector + knowledge graph | 61.00% | 726 |
-| LightRAG | Vector + knowledge graph | 89.00% | 28,443 |
-| **LM Compressor** | **Vector retrieval** | **91.00%** | **12,533** |
-
-## Core Concepts
-
-After running the first example, let's dive into the design philosophy of LM Compressor. These five core concepts correspond one-to-one with the solutions mentioned earlier, together building a complete context management system:
-
-### 1. Structured Compression → Solves Bloat
-
-We no longer view conversation context as flat text slices but unify them into an abstract virtual SQLite database. Whether it's memories, resources, or capabilities, they are mapped to structured tables under the `sqlite://` protocol, each with a unique URI.
-
-This paradigm gives AI agents unprecedented context manipulation capabilities, enabling them to locate, browse, and manipulate information precisely and deterministically through standard SQL commands like `SELECT` and `JOIN`, just like a developer. This transforms context management from vague semantic matching into intuitive, traceable "database operations". Learn more: [Database Schema](./docs/en/concepts/04-database-schema.md) | [Context Types](./docs/en/concepts/02-context-types.md)
-
-```
-sqlite://
-├── resources/              # Resources: project docs, repos, web pages, etc.
-│   ├── my_project/
-│   │   ├── docs/
-│   │   │   ├── api/
-│   │   │   └── tutorials/
-│   │   └── src/
-│   └── ...
-├── user/                   # User: personal preferences, habits, etc.
-│   └── {user_id}/
-│       ├── memories/
-│       │   ├── preferences/
-│       │   │   ├── writing_style
-│       │   │   └── coding_habits
-│       │   └── ...
-│       ├── resources/
-│       │   └── private_project/
-│       ├── skills/
-│       │   ├── search_code
-│       │   └── analyze_data
-│       └── peers/
-│           └── web-visitor-alice/
-│               ├── memories/
-│               └── resources/
-```
-
-### 2. High-Quality Retention → Reduces Token Consumption
-
-Stuffing massive amounts of context into a prompt all at once is not only expensive but also prone to exceeding model windows and introducing noise. LM Compressor automatically processes context into three levels upon writing:
-
-- **L0 (Abstract)**: A one-sentence summary for quick retrieval and identification.
-- **L1 (Overview)**: Contains core information and usage scenarios for AI decision-making during the planning phase.
-- **L2 (Details)**: The full original data, for deep reading by the AI when absolutely necessary.
-
-Learn more: [Context Layers](./docs/en/concepts/03-context-layers.md)
-
-```
-sqlite://resources/my_project/
-├── .abstract               # L0 Layer: Abstract (~100 tokens) - Quick relevance check
-├── .overview               # L1 Layer: Overview (~2k tokens) - Understand structure and key points
-├── docs/
-│   ├── .abstract          # Each directory has corresponding L0/L1 layers
-│   ├── .overview
-│   ├── api/
-│   │   ├── .abstract
-│   │   ├── .overview
-│   │   ├── auth.md        # L2 Layer: Full content - Load on demand
-│   │   └── endpoints.md
-│   └── ...
-└── src/
-    └── ...
-```
-
-### 3. Directory Recursive Retrieval → Improves Effectiveness
-
-Single vector retrieval struggles with complex query intents. LM Compressor has designed an innovative **Directory Recursive Retrieval Strategy** that deeply integrates multiple retrieval methods:
-
-1. **Intent Analysis**: Generate multiple retrieval conditions through intent analysis.
-2. **Initial Positioning**: Use vector retrieval to quickly locate the high-score directory where the initial slice is located.
-3. **Refined Exploration**: Perform a secondary retrieval within that directory and update high-score results to the candidate set.
-4. **Recursive Drill-down**: If subdirectories exist, recursively repeat the secondary retrieval steps layer by layer.
-5. **Result Aggregation**: Finally, obtain the most relevant context to return.
-
-This "lock high-score directory first, then refine content exploration" strategy not only finds the semantically best-matching fragments but also understands the full context where the information resides, thereby improving the globality and accuracy of retrieval. Learn more: [Retrieval Mechanism](./docs/en/concepts/07-retrieval.md)
-
-### 4. Visualized Extraction Trajectory → Observable Context
-
-LM Compressor's organization uses a hierarchical virtual database structure. All context is integrated in a unified format, and each entry corresponds to a unique URI (like a `sqlite://` path), breaking the traditional flat black-box management mode with a clear hierarchy that is easy to understand.
-
-The retrieval process adopts a directory recursive strategy. The trajectory of directory browsing and file positioning for each retrieval is fully preserved, allowing users to clearly observe the root cause of problems and guide the optimization of retrieval logic. Learn more: [Retrieval Mechanism](./docs/en/concepts/07-retrieval.md)
-
-### 5. Automatic Session Management → Context Self-Iteration
-
-LM Compressor has a built-in memory self-iteration loop. At the end of each session, developers can actively trigger the memory extraction mechanism. The system will asynchronously analyze task execution results and user feedback, and automatically update them to the User and Agent memory directories.
-
-- **User Memory Update**: Update memories related to user preferences, making AI responses better fit user needs.
-- **Agent Experience Accumulation**: Extract core content such as operational tips and tool usage experience from task execution experience, aiding efficient decision-making in subsequent tasks.
-
-This allows the AI to get "smarter with use" through interactions with the world, achieving self-evolution. Learn more: [Session Management](./docs/en/concepts/08-session.md)
 
 ***
 
@@ -301,9 +151,6 @@ This is for everyone's benefit. You get to Vibe-Code, so we get to verify.
 
 ### Q: Where can I report bugs or request new features?
 **A**: Please use the [GitHub Issues](https://github.com/melapisthebee/AI-Chat-Compressor/issues) page. Be sure to include detailed information about your setup, steps to reproduce, and expected behavior!
-
-### Q: How do I get help with my project?
-**A**: Join our community on [Discord](https://discord.gg/your-invite) for real-time assistance from other developers and contributors.
 
 ***
 
