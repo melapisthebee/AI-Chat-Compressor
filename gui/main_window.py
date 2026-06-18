@@ -9,6 +9,7 @@ from database.queries import get_or_create_project, list_all_projects, get_proje
 from database.models import Project
 from engine.compression import CompressionEngine
 from gui.components.token_dashboard import TokenDashboardWidget, TokenBudgetSettingsWidget
+from gui.components.logging_options import LoggingOptionsWidget
 
 # Import parser function
 from engine.parser import parse_lm_studio_file
@@ -170,6 +171,16 @@ class MainWindow(QMainWindow):
         console_scroll.setFrameShape(QFrame.Shape.NoFrame)
         console_scroll_content = QWidget()
         console_layout = QVBoxLayout(console_scroll_content)
+
+        # Tab 2: Token Dashboard
+        self.token_dashboard = TokenDashboardWidget()
+        self.tab_widget.addTab(self.token_dashboard, "📊 Token Dashboard")
+        
+        # Tab 3: Dedicated Logging Configuration (Replacing duplicate widget panel)
+        self.logging_options_widget = LoggingOptionsWidget()
+        self.tab_widget.addTab(self.logging_options_widget, "📋 Logging Configuration")
+        
+        main_layout.addWidget(self.tab_widget, stretch=1)
         
         # Drag and Drop zone instance
         from gui.components.drop_zone import DropZone
@@ -455,30 +466,30 @@ class MainWindow(QMainWindow):
     def set_status_indicator(self, state):
         """
         Updates the visual status indicator dot based on application state.
-        States: IDLE (solid green), RUNNING (blinking green), SUCCESS (solid green),
-                WARNING (solid yellow), CRITICAL (blinking red), DB_ERROR (blinking red)
+        Enforces strict runtime safety assertions to ensure background tasks aren't step-interrupted.
         """
+        # Guard: If a worker thread is running, block external state assignments unless it's an explicit failure/success signal
+        if self.current_state == "RUNNING" and state not in ("SUCCESS", "CRITICAL", "DB_ERROR", "WARNING"):
+            print(f"⚠️ State change request '{state}' rejected. Thread pipeline locked to RUNNING context.")
+            return
+
         self.current_state = state
         
-        # Stop any existing timer first
         if self.blink_timer.isActive():
             self.blink_timer.stop()
         
-        # Determine color and blinking behavior based on state
         if state == "IDLE":
-            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")  # Solid green
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")
         elif state == "RUNNING":
-            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")  # Green base
-            self.blink_timer.start(500)  # Blink every 500ms
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")
+            self.blink_timer.start(500)
         elif state == "SUCCESS":
-            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")  # Solid green
-            self.blink_timer.stop()
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")
         elif state == "WARNING":
-            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #ff9800;")  # Orange/Yellow
-            self.blink_timer.stop()
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #ff9800;")
         elif state in ("CRITICAL", "DB_ERROR"):
-            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #f44336;")  # Red base
-            self.blink_timer.start(125)  # Blink every 125ms
+            self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #f44336;")
+            self.blink_timer.start(125)
 
     def toggle_blink_indicator(self):
         """
