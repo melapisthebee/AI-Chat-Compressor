@@ -1,6 +1,6 @@
 import os
 import json
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QTextEdit, QPushButton, QMessageBox, QApplication, QFrame, QTabWidget, QScrollArea)
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QTextEdit, QPushButton, QMessageBox, QApplication, QFrame, QListWidget, QStackedWidget, QScrollArea)
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QFont
 
@@ -8,8 +8,7 @@ from database.connection import SessionLocal, init_db
 from database.queries import get_or_create_project, list_all_projects, get_project_knowledge
 from database.models import Project
 from engine.compression import CompressionEngine
-from gui.components.token_dashboard import TokenDashboardWidget, TokenBudgetSettingsWidget
-from gui.components.logging_options import LoggingOptionsWidget
+from gui.components.token_dashboard import TokenDashboardWidget
 
 # Import parser function
 from engine.parser import parse_lm_studio_file
@@ -102,28 +101,57 @@ class MainWindow(QMainWindow):
         # Store current project stats for dashboard
         self.current_project_stats = {}
         
-        # Core Dark Theme Base Stylesheet
+        # Core Industrial Dark Theme Stylesheet
+        # Core Industrial Dark Theme Stylesheet
         self.setStyleSheet("""
             QMainWindow { background-color: #121212; }
-            QLabel { color: #ffffff; }
+            QLabel { color: #cccccc; }
+            
             QComboBox { 
                 background-color: #1e1e1e; color: #ffffff; 
-                border: 1px solid #3d3d3d; border-radius: 4px; padding: 6px; 
+                border: 1px solid #3d3d3d; border-radius: 2px; padding: 4px 8px; 
             }
+            QComboBox::drop-down { border-left: 1px solid #3d3d3d; }
             QComboBox QAbstractItemView {
                 background-color: #1e1e1e; color: #ffffff;
                 selection-background-color: #333333;
+                border: 1px solid #3d3d3d;
             }
+            
             QTextEdit { 
-                background-color: #1e1e1e; color: #8ae9fd; font-family: 'Consolas', 'Courier New';
-                border: 1px solid #3d3d3d; border-radius: 4px; 
+                background-color: #1a1a1a; color: #8ae9fd; 
+                font-family: 'Consolas', 'Courier New', monospace; font-size: 13px;
+                border: 1px solid #2a2a2a; border-radius: 2px; 
             }
+            
             QPushButton {
-                background-color: #212121; color: #ffffff;
-                border: 1px solid #3d3d3d; border-radius: 4px; padding: 4px 12px;
+                background-color: #222222; color: #e0e0e0;
+                border: 1px solid #3d3d3d; border-radius: 2px; padding: 4px 12px;
             }
-            QPushButton:hover {
-                background-color: #333333; border: 1px solid #555555;
+            QPushButton:hover { background-color: #333333; border: 1px solid #5c5c5c; color: #ffffff; }
+            QPushButton:pressed { background-color: #1a1a1a; }
+            
+            /* Vertical Sidebar Styling */
+            QListWidget {
+                background-color: #161616;
+                border: 1px solid #2a2a2a;
+                border-radius: 2px;
+                outline: none;
+            }
+            QListWidget::item {
+                color: #888888;
+                padding: 12px 20px;
+                border-bottom: 1px solid #1a1a1a;
+                border-right: 2px solid transparent;
+            }
+            QListWidget::item:selected {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                border-right: 2px solid #8ae9fd;
+            }
+            QListWidget::item:hover:!selected {
+                background-color: #1a1a1a;
+                color: #cccccc;
             }
         """)
 
@@ -131,103 +159,105 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
         
-        # Project Selector Field Row (Upgraded to Editable QComboBox with visual indicators)
+        # --- TOP HEADER ROW ---
         proj_layout = QHBoxLayout()
         
         # Visual Status Indicator Dot
         self.status_indicator = QFrame()
-        self.status_indicator.setFixedSize(12, 12)
-        self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")
+        self.status_indicator.setFixedSize(10, 10)
+        self.status_indicator.setStyleSheet("border-radius: 5px; background-color: #4caf50;")
         proj_layout.addWidget(self.status_indicator)
         
-        # Settings Button
-        settings_btn = QPushButton("⚙️ Settings")
-        settings_btn.setFixedWidth(80)
-        settings_btn.setToolTip("Configure Token Budget Settings")
-        settings_btn.clicked.connect(self.open_settings_dialog)
-        proj_layout.addWidget(settings_btn)
-        
         # Project Label
-        proj_label = QLabel("Active Target Project Profile:")
-        proj_label.setStyleSheet("font-weight: bold; margin-left: 8px;")
+        proj_label = QLabel("TARGET PROFILE //")
+        proj_label.setStyleSheet("font-weight: bold; margin-left: 4px; color: #888888; letter-spacing: 1px;")
         proj_layout.addWidget(proj_label)
         
-        # Shortened Project Input (20% smaller than default)
+        # Shortened Project Input (Locked Width)
         self.project_input = QComboBox()
         self.project_input.setEditable(True)
-        self.project_input.setPlaceholderText("Select or type a project name...")
-        self.project_input.setMinimumWidth(200)  # Reduced width
+        self.project_input.setPlaceholderText("Select or initialize...")
+        self.project_input.setFixedWidth(240) 
         proj_layout.addWidget(self.project_input)
         
+        # Quick Settings Gear Icon
+        self.quick_settings_btn = QPushButton("⚙️")
+        self.quick_settings_btn.setFixedSize(28, 28)
+        self.quick_settings_btn.setToolTip("Open Token Settings")
+        self.quick_settings_btn.clicked.connect(self.open_settings_dialog)
+        proj_layout.addWidget(self.quick_settings_btn)
+        
+        proj_layout.addStretch()
         main_layout.addLayout(proj_layout)
         
-        # Tab Widget for Dashboard and Console
-        self.tab_widget = QTabWidget()
+        # --- VERTICAL SIDEBAR WORKSPACE ---
+        body_layout = QHBoxLayout()
         
-        # Tab 1: Console Output
+        # Left Menu
+        self.sidebar = QListWidget()
+        self.sidebar.setFixedWidth(160)
+        
+        # Right Content Area
+        self.workspace = QStackedWidget()
+        
+        # Link the sidebar clicks to the workspace pages
+        self.sidebar.currentRowChanged.connect(self.workspace.setCurrentIndex)
+        
+        body_layout.addWidget(self.sidebar)
+        body_layout.addWidget(self.workspace, stretch=1)
+        main_layout.addLayout(body_layout, stretch=1)
+
+       # ---------------------------------------------------------
+        # REGISTER WORKSPACE PANELS (Order dictates Sidebar layout)
+        # ---------------------------------------------------------
+
+        # [1] Console Output (Set as primary active tab)
         console_scroll = QScrollArea()
         console_scroll.setWidgetResizable(True)
         console_scroll.setFrameShape(QFrame.Shape.NoFrame)
         console_scroll_content = QWidget()
         console_layout = QVBoxLayout(console_scroll_content)
+        console_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Tab 2: Token Dashboard
-        self.token_dashboard = TokenDashboardWidget()
-        self.tab_widget.addTab(self.token_dashboard, "📊 Token Dashboard")
-        
-        # Tab 3: Dedicated Logging Configuration (Replacing duplicate widget panel)
-        self.logging_options_widget = LoggingOptionsWidget()
-        self.tab_widget.addTab(self.logging_options_widget, "📋 Logging Configuration")
-        
-        main_layout.addWidget(self.tab_widget, stretch=1)
-        
-        # Drag and Drop zone instance
         from gui.components.drop_zone import DropZone
         self.drop_zone = DropZone()
         self.drop_zone.file_dropped.connect(self.handle_incoming_file)
         console_layout.addWidget(self.drop_zone)
         
-        # Output Logging Header Row
         log_header_layout = QHBoxLayout()
         log_label = QLabel("System Output / Current Project State Blueprint:")
         self.copy_btn = QPushButton("Copy Context State", self)
         self.copy_btn.setFixedWidth(140)
         self.copy_btn.clicked.connect(self.copy_state_to_clipboard)
-        
         log_header_layout.addWidget(log_label)
         log_header_layout.addStretch()
         log_header_layout.addWidget(self.copy_btn)
         console_layout.addLayout(log_header_layout)
         
-        # Console Display Text Frame
         self.console_output = QTextEdit()
         self.console_output.setReadOnly(True)
         console_layout.addWidget(self.console_output, stretch=1)
-        
         console_scroll.setWidget(console_scroll_content)
-        self.tab_widget.addTab(console_scroll, "📋 Console Output")
         
-        # Tab 2: Token Dashboard
+        self.workspace.addWidget(console_scroll)
+        self.sidebar.addItem("[>] Console")
+
+        # [2] Token Dashboard
         self.token_dashboard = TokenDashboardWidget()
-        self.tab_widget.addTab(self.token_dashboard, "📊 Token Dashboard")
-        
-        # Initialize dashboard with current settings after creation
+        self.workspace.addWidget(self.token_dashboard)
+        self.sidebar.addItem("[+] Dashboard")
+
+        # Load startup settings
         from engine.streaming_processor import token_budget_manager, initialize_settings_from_file
-        
-        # Load persisted settings on startup
         initialize_settings_from_file()
-        
         current_settings = token_budget_manager.get_current_settings()
         self.token_dashboard.update_settings(current_settings)
-        
-        # Tab 3: Settings
-        self.settings_widget = TokenBudgetSettingsWidget()
-        # Connect settings changes to dashboard updates
-        self.settings_widget.settings_changed.connect(self.token_dashboard.update_settings)
-        self.tab_widget.addTab(self.settings_widget, "⚙️ Token Settings")
-        
-        main_layout.addWidget(self.tab_widget, stretch=1)
+
+        # Force UI to start on the Console tab
+        self.sidebar.setCurrentRow(0)
         
         self.console_output.append("System Ready. Name or select your active project area above and drag in a log file.")
 
@@ -508,18 +538,18 @@ class MainWindow(QMainWindow):
 
     def open_settings_dialog(self):
         """
-        Open the token budget settings panel.
-        Switches to the settings tab in the main window.
+        Opens the dedicated settings dialog window.
+        Pauses interaction with the main window while open.
         """
-        # Switch to settings tab
-        for i in range(self.tab_widget.count()):
-            if self.tab_widget.tabText(i) == "⚙️ Token Settings":
-                self.tab_widget.setCurrentIndex(i)
-                break
+        from gui.components.settings_dialog import SettingsDialog
         
-        # Show a message that settings are available
-        self.console_output.append("\nToken Budget Settings panel is now active.\n")
-        self.console_output.append("Adjust chunk sizes, overlap, and token budgets as needed.\n")
+        dialog = SettingsDialog(self)
+        
+        # Connect the dialog's settings change signal back to the dashboard
+        dialog.settings_changed.connect(self.token_dashboard.update_settings)
+        
+        # Execute the dialog (this blocks the main window until closed)
+        dialog.exec()
 
     def closeEvent(self, event):
         """

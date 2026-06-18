@@ -295,7 +295,6 @@ class TokenBudgetSettingsWidget(QFrame):
                 streaming_processor.preserve_recent_tokens = saved_settings.get('preserve_recent_tokens', 5000)
                 
                 token_budget_manager.apply_settings(saved_settings)
-                print("✓ Loaded persisted token settings from file")
         except Exception as e:
             print(f"⚠️ Error loading persisted settings: {e}")
     
