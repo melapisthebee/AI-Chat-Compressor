@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QGroupBox, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont, QColor, QMouseEvent
 
 from engine.tokenizer import tracker
 
@@ -29,6 +29,7 @@ class ConversationPreviewWidget(QFrame):
         super().__init__(parent)
         self.messages = []  # List of parsed message dicts
         self.selected_indices = set()
+        self._locked = False
         self.setup_ui()
     
     def setup_ui(self):
@@ -58,12 +59,14 @@ class ConversationPreviewWidget(QFrame):
         select_all_btn.setFixedWidth(100)
         select_all_btn.clicked.connect(self.select_all_messages)
         select_all_btn.setStyleSheet(self._button_style())
+        select_all_btn.setObjectName("btn_select_all")
         header_layout.addWidget(select_all_btn)
         
         deselect_all_btn = QPushButton("Deselect All")
         deselect_all_btn.setFixedWidth(120)
         deselect_all_btn.clicked.connect(self.deselect_all_messages)
         deselect_all_btn.setStyleSheet(self._button_style())
+        deselect_all_btn.setObjectName("btn_deselect_all")
         header_layout.addWidget(deselect_all_btn)
         
         main_layout.addLayout(header_layout)
@@ -121,9 +124,92 @@ class ConversationPreviewWidget(QFrame):
                 background-color: #45a049;
             }
         """)
+        process_btn.setObjectName("btn_process")
         footer_layout.addWidget(process_btn)
         
         main_layout.addLayout(footer_layout)
+        
+        # Lock overlay widget (opaque dark grey, sits on top)
+        self._overlay = QFrame(self)
+        self._overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self._overlay.setStyleSheet("""
+            QFrame {
+                background-color: rgba(30, 30, 30, 220);
+                border-radius: 8px;
+            }
+        """)
+        self._overlay.setVisible(False)
+        self._overlay.mousePressEvent = self._overlay_mouse_event
+        
+        # Lock label on overlay
+        self._lock_label = QLabel("🔒 LOCKED — PROCESSING IN PROGRESS")
+        self._lock_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        self._lock_label.setStyleSheet("color: #ff9800;")
+        self._lock_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        overlay_layout = QVBoxLayout(self._overlay)
+        overlay_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        overlay_layout.addWidget(self._lock_label)
+        
+        self._overlay.raise_()
+        self._overlay.resize(self.size())
+        
+    def resizeEvent(self, event):
+        """Keep overlay sized with the widget."""
+        super().resizeEvent(event)
+        self._overlay.resize(self.size())
+    
+    def _overlay_mouse_event(self, e: QMouseEvent):
+        """Swallow all clicks on the overlay."""
+        e.ignore()
+    
+    def set_locked(self, locked: bool):
+        """Lock or unlock the preview panel."""
+        self._locked = locked
+        self._overlay.setVisible(locked)
+        
+        # Disable selection interaction on the list
+        self.message_list.setEnabled(not locked)
+        
+        # Disable selection buttons
+        btn = self.findChild(QPushButton, "btn_select_all")
+        if btn:
+            btn.setEnabled(not locked)
+        
+        btn = self.findChild(QPushButton, "btn_deselect_all")
+        if btn:
+            btn.setEnabled(not locked)
+        
+        # Grey out the process button
+        btn = self.findChild(QPushButton, "btn_process")
+        if btn:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #555555;
+                    color: #888888;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                }
+            """)
+            btn.setEnabled(False)
+        else:
+            # fallback: by object name
+            for child in self.findChildren(QPushButton):
+                if "Process" in child.text():
+                    child.setStyleSheet("""
+                        QPushButton {
+                            background-color: #555555;
+                            color: #888888;
+                            border: none;
+                            border-radius: 4px;
+                            padding: 8px 16px;
+                            font-weight: bold;
+                        }
+                    """)
+                    child.setEnabled(False)
+                    break
     
     def _button_style(self):
         return """

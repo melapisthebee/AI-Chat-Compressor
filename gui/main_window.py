@@ -418,7 +418,7 @@ class MainWindow(QMainWindow):
             db.close()
 
     def load_project_history_to_screen(self, project_name: str):
-        """Pulls historical context records straight to the terminal if selected."""
+        """Pulls historical context records and loads timeline for the selected project."""
         clean_name = project_name.strip()
         
         # Guard: blank or non-matching names clear the console entirely
@@ -439,6 +439,9 @@ class MainWindow(QMainWindow):
                 else:
                     self.console_output.clear()
                     self.console_output.append(f"Profile '{project_name}' is active but contains no historical records yet.")
+                
+                # Load the history timeline for this project
+                self.history_timeline.load_timeline(clean_name)
             else:
                 # Name doesn't match any database entry - clear the view
                 self.console_output.clear()
@@ -481,6 +484,9 @@ class MainWindow(QMainWindow):
         self.drop_zone.setAcceptDrops(False)
         self.project_input.setEnabled(False)
         self.copy_btn.setEnabled(False)
+        
+        # Lock preview panel — visible but non-interactive
+        self.conversation_preview.set_locked(True)
         
         # Set running indicator
         self.set_status_indicator("RUNNING")
@@ -694,6 +700,8 @@ class MainWindow(QMainWindow):
         self.drop_zone.setAcceptDrops(True)
         self.project_input.setEnabled(True)
         self.copy_btn.setEnabled(True)
+        # Unlock preview panel
+        self.conversation_preview.set_locked(False)
         # Return to idle state
         self.progress_bar.setValue(0)
         self.phase_label.setText("IDLE")
@@ -756,8 +764,25 @@ class MainWindow(QMainWindow):
         # Connect the dialog's settings change signal back to the dashboard
         dialog.settings_changed.connect(self.token_dashboard.update_settings)
         
+        # Connect API settings changes to update the engine's client
+        dialog.api_settings.settings_changed.connect(self._on_api_settings_changed)
+        
         # Execute the dialog (this blocks the main window until closed)
         dialog.exec()
+    
+    def _on_api_settings_changed(self, data):
+        """Apply API settings changes to the running configuration."""
+        from config.settings import settings
+        
+        if 'request_timeout' in data:
+            settings.REQUEST_TIMEOUT = data['request_timeout']
+            self.console_output.append(f">> API timeout updated to {data['request_timeout']}s")
+        if 'max_retries' in data:
+            settings.MAX_RETRIES = data['max_retries']
+        if 'retry_base_delay' in data:
+            settings.RETRY_BASE_DELAY = data['retry_base_delay']
+        if 'default_model' in data:
+            settings.DEFAULT_COMPRESSION_MODEL = data['default_model']
 
     def closeEvent(self, event):
         """Safely captures application shutdown attempts and forces the background worker through the explicit Quit-Wait lifecycle execution pattern."""

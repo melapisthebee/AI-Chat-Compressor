@@ -28,6 +28,7 @@ class CompressionEngine:
         self.streaming_processor = streaming_processor
         self.token_budget_manager = token_budget_manager
         self.stats_callback = stats_callback
+        self._http_request_count = 0
 
     def check_lm_studio_health(self) -> bool:
         try:
@@ -50,6 +51,7 @@ class CompressionEngine:
         last_exception = None
 
         for attempt in range(max_retries + 1):
+            self._http_request_count += 1
             try:
                 return call_func(*args, **kwargs)
             except (APIConnectionError, APITimeoutError, RateLimitError) as e:
@@ -60,11 +62,23 @@ class CompressionEngine:
                     self.logger.log(f"Non-retryable error: {str(e)}")
                     raise RuntimeError(f"Model unavailable: {str(e)}. Please reload the model in LM Studio and retry.")
 
-                if "timeout" in error_str and attempt == 0:
-                    self.logger.log("First timeout detected. This can happen with large conversations or slow models.")
-                    self.logger.log("   LM Studio may still be processing. Retrying with exponential backoff...")
+                if "timeout" in error_str:
+                    if attempt == 0:
+                        self.logger.log("First timeout detected. This can happen with large conversations or slow models.")
+                        self.logger.log("   LM Studio may still be processing. Retrying with exponential backoff...")
+                    else:
+                        self.logger.log(f"Retry timeout on attempt {attempt + 1}. LM Studio may still be processing from a previous attempt.")
 
-                if attempt < max_retries:
+                if "timeout" in error_str and attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    self.logger.log(f"Transient failure (attempt {attempt + 1}/{max_retries + 1}): {str(e)}")
+                    self.logger.log(f"Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                elif "timeout" in error_str and attempt == max_retries:
+                    self.logger.log(f"Timeout after {max_retries + 1} attempts. LM Studio may still be processing.")
+                    self.logger.log(f"Last error: {str(e)}")
+                    raise RuntimeError(f"LM Studio API timed out after {max_retries + 1} attempts. {str(e)}")
+                elif attempt < max_retries:
                     delay = base_delay * (2 ** attempt)
                     self.logger.log(f"Transient failure (attempt {attempt + 1}/{max_retries + 1}): {str(e)}")
                     self.logger.log(f"Retrying in {delay} seconds...")
@@ -128,7 +142,7 @@ class CompressionEngine:
             '  "current_active_track": {\n'
             '    "status": "Updated workflow state",\n'
             '    "active_issue_or_bug": "Description of errors or stack traces if identified...",\n'
-            '    "next_immediate_steps": "Updated scannable steps to resume work..."'
+            '    "next_immediate_steps": "Updated scannable steps to resume work..."\n'
             "  }\n"
             "}"
         )
@@ -287,7 +301,7 @@ class CompressionEngine:
             recovery_attempts.append("Attempt 3: json-repair not installed")
 
         try:
-            clean_str = re.sub(r'[,\}\]\s]*$', '', json_str)
+            clean_str = re.sub(r'[,}\]\s]*$', '', json_str)
             result = json.loads(clean_str)
             recovery_attempts.append("Attempt 4: Trailing content removal")
             self.logger.log(f"JSON recovered on attempt {len(recovery_attempts)}: Trailing cleanup")
@@ -331,7 +345,8 @@ class CompressionEngine:
 
         # Track progress externally
         processing_stats = {'chunks_processed': 0, 'total_tokens_processed': 0}
-        llm_call_count = 0
+        logical_call_count = 0
+        self._http_request_count = 0
 
         # Store chunk texts for the audit pass
         chunk_texts = {}
@@ -340,18 +355,19 @@ class CompressionEngine:
         self.logger.log("=== PASS 1: EXTRACTION ===")
 
         def extraction_callback(chunk_data, chunk_index):
-            nonlocal active_knowledge, llm_call_count
+            nonlocal active_knowledge, logical_call_count
             decoded_chunk = chunk_data['text']
 
             # Store for audit pass
             chunk_texts[chunk_index] = decoded_chunk
 
-            self.logger.log(f"Processing chunk {chunk_index}... ({len(decoded_chunk)} chars, {chunk_data['token_count']} tokens) [{llm_call_count} LLM calls made]")
+            self.logger.log(f"Processing chunk {chunk_index}... ({len(decoded_chunk)} chars, {chunk_data['token_count']} tokens) [{logical_call_count} logical calls, {self._http_request_count} HTTP requests]")
             self.logger.log(f"   Current knowledge categories: {len(active_knowledge.keys())}")
 
             # EXTRACTION pass only
             self.logger.log(f"   Extraction pass on chunk {chunk_index}...")
-            llm_call_count += 1
+            logical_call_count += 1
+
             try:
                 delta = self._call_llm_for_knowledge_merge(active_knowledge, decoded_chunk, chunk_index)
                 if delta:
@@ -401,7 +417,7 @@ class CompressionEngine:
             )
             stream_stats = result.get('statistics', {})
             total_chunks = stream_stats.get('total_chunks_processed', 0)
-            self.logger.log(f"Extraction pass completed: {total_chunks} chunks processed, {llm_call_count} LLM calls made")
+            self.logger.log(f"Extraction pass completed: {total_chunks} chunks processed, {logical_call_count} logical calls ({self._http_request_count} HTTP requests)")
         except RuntimeError as e:
             raise
         except Exception as e:
@@ -410,13 +426,13 @@ class CompressionEngine:
         # ---- PASS 2: AUDIT (all chunks) ----
         self.logger.log("=== PASS 2: AUDIT ===")
 
-        audit_llm_call_count = 0
+        audit_logical_call_count = 0
         chunk_indices = sorted(chunk_texts.keys())
 
         for ci in chunk_indices:
             decoded_chunk = chunk_texts[ci]
-            self.logger.log(f"Audit pass on chunk {ci}... [{llm_call_count + audit_llm_call_count} LLM calls made]")
-            audit_llm_call_count += 1
+            self.logger.log(f"Audit pass on chunk {ci}... [{logical_call_count + audit_logical_call_count} logical calls, {self._http_request_count} HTTP requests]")
+            audit_logical_call_count += 1
 
             try:
                 audit_delta = self._call_llm_for_verification(active_knowledge, decoded_chunk, ci)
@@ -428,9 +444,9 @@ class CompressionEngine:
             except Exception as e:
                 self.logger.log(f"   Audit error on chunk {ci}: {str(e)[:200]}")
 
-        total_llm_calls = llm_call_count + audit_llm_call_count
-        self.logger.log(f"Audit pass completed: {total_chunks} chunks audited, {audit_llm_call_count} LLM calls made")
-        self.logger.log(f"Total LLM calls this run: {total_llm_calls} ({llm_call_count} extraction + {audit_llm_call_count} audit)")
+        total_logical_calls = logical_call_count + audit_logical_call_count
+        self.logger.log(f"Audit pass completed: {total_chunks} chunks audited, {audit_logical_call_count} logical calls")
+        self.logger.log(f"Total LLM calls this run: {total_logical_calls} logical calls ({self._http_request_count} HTTP requests) ({logical_call_count} extraction + {audit_logical_call_count} audit)")
 
         # Update processing statistics
         self.streaming_processor.update_stats(
@@ -452,7 +468,8 @@ class CompressionEngine:
             project_id=project_id,
             filename=filename,
             raw_tokens=raw_token_count,
-            compressed_tokens=compressed_payload_tokens
+            compressed_tokens=compressed_payload_tokens,
+            knowledge_snapshot=active_knowledge
         )
 
         update_adaptive_knowledge(
@@ -480,6 +497,7 @@ class CompressionEngine:
                 'total_tokens_processed': stream_stats.get('total_raw_tokens', 0),
                 'processing_time_seconds': stream_stats.get('processing_time_seconds', 0),
                 'memory_efficiency': stream_stats.get('memory_efficiency', 0),
-                'total_llm_calls': total_llm_calls,
+                'total_logical_calls': total_logical_calls,
+                'total_http_requests': self._http_request_count,
             }
         }
