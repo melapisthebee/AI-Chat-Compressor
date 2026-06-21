@@ -419,12 +419,16 @@ class MainWindow(QMainWindow):
 
     def load_project_history_to_screen(self, project_name: str):
         """Pulls historical context records straight to the terminal if selected."""
-        if not project_name.strip():
+        clean_name = project_name.strip()
+        
+        # Guard: blank or non-matching names clear the console entirely
+        if not clean_name:
+            self.console_output.clear()
             return
             
         db = SessionLocal()
         try:
-            project = db.query(Project).filter(Project.name == project_name.strip()).first()
+            project = db.query(Project).filter(Project.name == clean_name).first()
             if project:
                 knowledge = get_project_knowledge(db, project.id)
                 if knowledge:
@@ -435,6 +439,9 @@ class MainWindow(QMainWindow):
                 else:
                     self.console_output.clear()
                     self.console_output.append(f"Profile '{project_name}' is active but contains no historical records yet.")
+            else:
+                # Name doesn't match any database entry - clear the view
+                self.console_output.clear()
         finally:
             db.close()
 
