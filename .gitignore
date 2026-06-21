@@ -14,3 +14,4 @@ storage/archive.db
 
 # Protected files
 .env
+python-verification/
