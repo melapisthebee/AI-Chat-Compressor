@@ -4,8 +4,6 @@
 
 ***
 
-***
-
 <div align="center">
 
 <a href="https://github.com/melapisthebee/AI-Chat-Compressor">
