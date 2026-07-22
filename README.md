@@ -4,14 +4,14 @@
 
 ***
 
-<div align="center">
+## Star History
 
-<a href="https://github.com/melapisthebee/AI-Chat-Compressor">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
-  </picture>
+<a href="https://www.star-history.com/?repos=melapisthebee%2FAI-Chat-Compressor&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=date&theme=dark&legend=top-left&sealed_token=AkVTSA0cfM3gNKqgQSzAy78cfDvLG_6HZdWeB0g0Bj5z6_JqgkXeKtExNEiYpGgTZlmsMCgP6P8a6ikfaiSohsDqUGIZkoGjcGyiHRTUAVKCAdgSCHCGvdeSGt5RUH7mp3aWDcRmO1r_NTo7Xt9LsFu8KGo4u5bMB4fbmFqQ47BT_oTaUvUcLYNCeKVx" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=date&legend=top-left&sealed_token=AkVTSA0cfM3gNKqgQSzAy78cfDvLG_6HZdWeB0g0Bj5z6_JqgkXeKtExNEiYpGgTZlmsMCgP6P8a6ikfaiSohsDqUGIZkoGjcGyiHRTUAVKCAdgSCHCGvdeSGt5RUH7mp3aWDcRmO1r_NTo7Xt9LsFu8KGo4u5bMB4fbmFqQ47BT_oTaUvUcLYNCeKVx" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=date&legend=top-left&sealed_token=AkVTSA0cfM3gNKqgQSzAy78cfDvLG_6HZdWeB0g0Bj5z6_JqgkXeKtExNEiYpGgTZlmsMCgP6P8a6ikfaiSohsDqUGIZkoGjcGyiHRTUAVKCAdgSCHCGvdeSGt5RUH7mp3aWDcRmO1r_NTo7Xt9LsFu8KGo4u5bMB4fbmFqQ47BT_oTaUvUcLYNCeKVx" />
+ </picture>
 </a>
 
 ***
