@@ -4,6 +4,20 @@
 
 ***
 
+***
+
+<div align="center">
+
+<a href="https://github.com/melapisthebee/AI-Chat-Compressor">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
+  </picture>
+</a>
+
+***
+
 ## Overview
 
 In the age of AI-powered assistants, conversations generate massive amounts of context data. When building custom AI agents or analyzing chat logs, developers often face these challenges:
@@ -187,19 +201,6 @@ This is for everyone's benefit. You get to Vibe-Code, so we get to verify.
 ### Q: Where can I report bugs or request new features?
 **A**: Please use the [GitHub Issues](https://github.com/melapisthebee/AI-Chat-Compressor/issues) page. Be sure to include detailed information about your setup, steps to reproduce, and expected behavior!
 
-***
-
-<div align="center">
-
-<a href="https://github.com/melapisthebee/AI-Chat-Compressor">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=melapisthebee/AI-Chat-Compressor&type=timeline&legend=top-left" />
-  </picture>
-</a>
-
-***
 
 ## License
 
