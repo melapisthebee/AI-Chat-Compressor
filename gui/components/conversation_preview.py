@@ -73,6 +73,7 @@ class ConversationPreviewWidget(QFrame):
         
         # Message list with scroll area
         self.message_list = QListWidget()
+        self.message_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         self.message_list.setAlternatingRowColors(True)
         self.message_list.setStyleSheet("""
             QListWidget {
@@ -84,10 +85,6 @@ class ConversationPreviewWidget(QFrame):
             QListWidget::item {
                 padding: 8px;
                 border-bottom: 1px solid #2a2a2a;
-            }
-            QListWidget::item:selected {
-                background-color: #2d4a2d;
-                color: #8ae9fd;
             }
         """)
         self.message_list.itemClicked.connect(self.on_item_clicked)
@@ -255,10 +252,15 @@ class ConversationPreviewWidget(QFrame):
         
         if idx in self.selected_indices:
             self.selected_indices.remove(idx)
+            item.setBackground(QColor("#1a1a1a"))
             item.setForeground(QColor("#cccccc"))
         else:
             self.selected_indices.add(idx)
+            item.setBackground(QColor("#1a2a3a"))
             item.setForeground(QColor("#8ae9fd"))
+        
+        # Force repaint
+        self.message_list.viewport().update()
         
         self.update_stats()
     
@@ -269,8 +271,10 @@ class ConversationPreviewWidget(QFrame):
             idx = item.data(Qt.ItemDataRole.UserRole)
             if idx not in self.selected_indices:
                 self.selected_indices.add(idx)
+                item.setBackground(QColor("#1a2a3a"))
                 item.setForeground(QColor("#8ae9fd"))
         
+        self.message_list.viewport().update()
         self.update_stats()
     
     def deselect_all_messages(self):
@@ -279,8 +283,10 @@ class ConversationPreviewWidget(QFrame):
         
         for row in range(self.message_list.count()):
             item = self.message_list.item(row)
+            item.setBackground(QColor("#1a1a1a"))
             item.setForeground(QColor("#cccccc"))
         
+        self.message_list.viewport().update()
         self.update_stats()
     
     def update_stats(self):
