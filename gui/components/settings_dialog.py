@@ -3,6 +3,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from gui.components.token_dashboard import TokenBudgetSettingsWidget
 from gui.components.logging_options import LoggingOptionsWidget
+from gui.components.api_settings import ApiSettingsWidget
 
 class SettingsDialog(QDialog):
     """
@@ -72,5 +73,33 @@ class SettingsDialog(QDialog):
         self.workspace.addWidget(self.logging_options)
         self.sidebar.addItem("[#] Logging")
 
+        # [3] API Settings
+        self.api_settings = ApiSettingsWidget()
+        self.api_settings.settings_changed.connect(self.settings_changed.emit)
+        self.workspace.addWidget(self.api_settings)
+        self.sidebar.addItem("[!] API Settings")
+
+        # Load persisted API settings if available
+        self._load_persisted_api_settings()
+
         # Focus the first tab
         self.sidebar.setCurrentRow(0)
+
+    def _load_persisted_api_settings(self):
+        """Load persisted API settings from file on dialog open."""
+        import json
+        from gui.components.api_settings import API_SETTINGS_FILE
+        try:
+            if API_SETTINGS_FILE.exists():
+                with open(API_SETTINGS_FILE, 'r') as f:
+                    saved = json.load(f)
+                if 'request_timeout' in saved:
+                    self.api_settings.timeout_input.setValue(saved['request_timeout'])
+                if 'max_retries' in saved:
+                    self.api_settings.retry_input.setValue(saved['max_retries'])
+                if 'retry_base_delay' in saved:
+                    self.api_settings.delay_input.setValue(saved['retry_base_delay'])
+                if 'default_model' in saved:
+                    self.api_settings.model_input.setCurrentText(saved['default_model'])
+        except Exception as e:
+            print(f"⚠️ Error loading persisted API settings: {e}")

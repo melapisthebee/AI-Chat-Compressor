@@ -35,6 +35,7 @@ class Session(Base):
     imported_at = Column(DateTime, default=datetime.utcnow)
     raw_token_count = Column(Integer, nullable=False)
     compressed_token_count = Column(Integer, nullable=False)
+    knowledge_snapshot = Column(JSON, nullable=True)
 
     # Relationships
     project = relationship("Project", back_populates="sessions")

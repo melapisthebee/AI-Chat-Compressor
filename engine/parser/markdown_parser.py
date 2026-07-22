@@ -43,7 +43,7 @@ class MarkdownParser(BaseParser):
         temp_content = re.sub(code_block_pattern, save_code_block, content)
         
         # Pattern to detect role markers (can be headers or inline)
-        pattern = re.compile(r'(?mi)^(#{1,6}\s*)?(###\s+)?(user|assistant|ai|system|human|bot):\s*', re.MULTILINE)
+        pattern = re.compile(r'(?mi)^(#{1,6}\s*)?(###\s+)?(user|assistant|ai|system|human|bot|prompt|response):\s*', re.MULTILINE)
         all_matches = list(pattern.finditer(temp_content))
 
         cleaned_messages = []
@@ -54,9 +54,9 @@ class MarkdownParser(BaseParser):
             
             role = match.group(3).lower()
             # Normalize role names
-            if role in ('human', 'user'): 
+            if role in ('human', 'user', 'prompt'):
                 role = 'user'
-            elif role in ('ai', 'bot', 'assistant'): 
+            elif role in ('ai', 'bot', 'assistant', 'response'):
                 role = 'assistant'
                 
             msg_content = temp_content[start_idx:end_idx].strip()

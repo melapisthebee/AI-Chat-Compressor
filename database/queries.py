@@ -75,7 +75,8 @@ def create_session_record(
     project_id: int, 
     filename: str, 
     raw_tokens: int, 
-    compressed_tokens: int
+    compressed_tokens: int,
+    knowledge_snapshot: Optional[Dict[str, Any]] = None
 ) -> ChatSession:
     """
     Logs the metadata of an imported conversation file.
@@ -85,7 +86,8 @@ def create_session_record(
         project_id=project_id,
         filename=filename,
         raw_token_count=raw_tokens,
-        compressed_token_count=compressed_tokens
+        compressed_token_count=compressed_tokens,
+        knowledge_snapshot=knowledge_snapshot
     )
     with db_write_lock:
         db.add(session_record)

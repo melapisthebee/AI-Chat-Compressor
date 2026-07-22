@@ -1,6 +1,6 @@
 import os
 import json
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QTextEdit, QPushButton, QMessageBox, QApplication, QFrame, QListWidget, QStackedWidget, QScrollArea)
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QTextEdit, QPushButton, QMessageBox, QApplication, QFrame, QListWidget, QStackedWidget, QScrollArea, QProgressBar)
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QFont
 
@@ -9,6 +9,8 @@ from database.queries import get_or_create_project, list_all_projects, get_proje
 from database.models import Project
 from engine.compression import CompressionEngine
 from gui.components.token_dashboard import TokenDashboardWidget
+from gui.components.conversation_preview import ConversationPreviewWidget
+from gui.components.history_timeline import HistoryTimelineWidget
 
 # Import parser function
 from engine.parser import parse_lm_studio_file
@@ -19,7 +21,7 @@ class CompressionWorker(QThread):
     Worker thread tasked with processing the conversation through the LLM pipeline
     without freezing the GUI interface thread.
     """
-    progress_signal = pyqtSignal(str)
+    progress_signal = pyqtSignal(str, str)  # phase, message
     stats_signal = pyqtSignal(str, dict)  # project_name, dashboard_data per chunk
     finished_signal = pyqtSignal(dict, str, dict)  # knowledge, project_name, dashboard_data
     error_signal = pyqtSignal(str)
@@ -32,16 +34,16 @@ class CompressionWorker(QThread):
     def run(self):
         db = SessionLocal()
         try:
-            self.progress_signal.emit("Parsing source conversation log export file...")
+            self.progress_signal.emit("PARSING", "Parsing source conversation log export file...")
             messages = parse_lm_studio_file(self.filepath)
             print(f"Parsed {len(messages)} messages from file")
             filename = os.path.basename(self.filepath)
             
-            self.progress_signal.emit(f"Retrieving or constructing Project: '{self.project_name}'...")
+            self.progress_signal.emit("INITIALIZING", f"Retrieving or constructing Project: '{self.project_name}'...")
             project = get_or_create_project(db, self.project_name)
             print(f"Project '{project.name}' (ID: {project.id}) ready")
             
-            self.progress_signal.emit("Running sliding token window synchronization loop through local LLM...")
+            self.progress_signal.emit("COMPRESSION", "Running sliding token window synchronization loop through local LLM...")
             
             def _live_stats(raw_tokens, compressed_tokens, ratio, chunks_processed):
                 stats_data = {
@@ -58,6 +60,7 @@ class CompressionWorker(QThread):
             
             # Runs the dynamic context synchronization with streaming support
             print("\nStarting compression engine process_and_adapt()...")
+            self.progress_signal.emit("COMPRESSION", "Processing chunks through LLM extraction pass...")
             result = engine.process_and_adapt(db, project.id, messages, filename)
             
             # Handle both old and new return formats
@@ -72,12 +75,79 @@ class CompressionWorker(QThread):
                 updated_knowledge = result
                 dashboard_data = {}
                 processing_stats = {}
+            
+            self.progress_signal.emit("AUDIT", "Finalizing and committing knowledge updates...")
                 
             self.finished_signal.emit(updated_knowledge, self.project_name, dashboard_data)
         except Exception as e:
             import traceback
             error_detail = f"{str(e)}\n{traceback.format_exc()}"
             print(f"Worker thread failed: {error_detail}")
+            self.progress_signal.emit("ERROR", str(e))
+            self.error_signal.emit(str(e))
+        finally:
+            db.close()
+
+
+class CompressionWorkerWithMessages(QThread):
+    """
+    Worker thread that accepts pre-parsed messages for processing.
+    Used when user selects specific messages from preview panel.
+    """
+    progress_signal = pyqtSignal(str, str)  # phase, message
+    stats_signal = pyqtSignal(str, dict)  # project_name, dashboard_data per chunk
+    finished_signal = pyqtSignal(dict, str, dict)  # knowledge, project_name, dashboard_data
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, project_name: str, messages: list):
+        super().__init__()
+        self.project_name = project_name
+        self.messages = messages
+
+    def run(self):
+        db = SessionLocal()
+        try:
+            self.progress_signal.emit("INITIALIZING", f"Retrieving or constructing Project: '{self.project_name}'...")
+            project = get_or_create_project(db, self.project_name)
+            print(f"Project '{project.name}' (ID: {project.id}) ready")
+            
+            self.progress_signal.emit("COMPRESSION", "Running sliding token window synchronization loop through local LLM...")
+            
+            def _live_stats(raw_tokens, compressed_tokens, ratio, chunks_processed):
+                stats_data = {
+                    'raw_tokens': raw_tokens,
+                    'compressed_tokens': compressed_tokens,
+                    'ratio': ratio,
+                    'chunks': chunks_processed,
+                    'status': 'Processing'
+                }
+                self.stats_signal.emit(self.project_name, stats_data)
+            
+            engine = CompressionEngine(stats_callback=_live_stats)
+            
+            # Use a dummy filename since we're processing pre-parsed messages
+            filename = "selected_messages"
+            
+            print("\nStarting compression engine process_and_adapt()...")
+            self.progress_signal.emit("COMPRESSION", f"Processing {len(self.messages)} selected messages through LLM extraction pass...")
+            result = engine.process_and_adapt(db, project.id, self.messages, filename)
+            
+            if isinstance(result, dict):
+                updated_knowledge = result.get('knowledge', result)
+                dashboard_data = result.get('dashboard_data', {})
+                print(f"\nProcess completed: {len(updated_knowledge)} knowledge categories")
+            else:
+                updated_knowledge = result
+                dashboard_data = {}
+            
+            self.progress_signal.emit("AUDIT", "Finalizing and committing knowledge updates...")
+                
+            self.finished_signal.emit(updated_knowledge, self.project_name, dashboard_data)
+        except Exception as e:
+            import traceback
+            error_detail = f"{str(e)}\n{traceback.format_exc()}"
+            print(f"Worker thread failed: {error_detail}")
+            self.progress_signal.emit("ERROR", str(e))
             self.error_signal.emit(str(e))
         finally:
             db.close()
@@ -93,7 +163,7 @@ class MainWindow(QMainWindow):
         init_db()
         
         # State management for visual indicator
-        self.current_state = "IDLE"  # IDLE, RUNNING, SUCCESS, WARNING, CRITICAL, DB_ERROR
+        self.current_state = "IDLE"
         self.blink_timer = QTimer(self)
         self.blink_timer.timeout.connect(self.toggle_blink_indicator)
         self.blink_visible = True
@@ -101,7 +171,9 @@ class MainWindow(QMainWindow):
         # Store current project stats for dashboard
         self.current_project_stats = {}
         
-        # Core Industrial Dark Theme Stylesheet
+        # Progress tracking
+        self.current_phase = "IDLE"
+        
         # Core Industrial Dark Theme Stylesheet
         self.setStyleSheet("""
             QMainWindow { background-color: #121212; }
@@ -165,15 +237,20 @@ class MainWindow(QMainWindow):
         # --- TOP HEADER ROW ---
         proj_layout = QHBoxLayout()
         
-        # Visual Status Indicator Dot
+        # Visual Status Indicator Dot with Phase Label
         self.status_indicator = QFrame()
-        self.status_indicator.setFixedSize(10, 10)
-        self.status_indicator.setStyleSheet("border-radius: 5px; background-color: #4caf50;")
+        self.status_indicator.setFixedSize(12, 12)
+        self.status_indicator.setStyleSheet("border-radius: 6px; background-color: #4caf50;")
         proj_layout.addWidget(self.status_indicator)
         
+        # Phase Status Label
+        self.phase_label = QLabel("IDLE")
+        self.phase_label.setStyleSheet("font-weight: bold; margin-left: 8px; color: #8ae9fd; letter-spacing: 1px; font-size: 12px;")
+        proj_layout.addWidget(self.phase_label)
+        
         # Project Label
-        proj_label = QLabel("TARGET PROFILE //")
-        proj_label.setStyleSheet("font-weight: bold; margin-left: 4px; color: #888888; letter-spacing: 1px;")
+        proj_label = QLabel("// TARGET PROFILE")
+        proj_label.setStyleSheet("font-weight: bold; margin-left: 16px; color: #888888; letter-spacing: 1px;")
         proj_layout.addWidget(proj_label)
         
         # Shortened Project Input (Locked Width)
@@ -190,8 +267,55 @@ class MainWindow(QMainWindow):
         self.quick_settings_btn.clicked.connect(self.open_settings_dialog)
         proj_layout.addWidget(self.quick_settings_btn)
         
+        # Test Connection Button
+        test_conn_btn = QPushButton("🔌 Test Connection")
+        test_conn_btn.setFixedWidth(130)
+        test_conn_btn.setToolTip("Test LM Studio API connectivity")
+        test_conn_btn.clicked.connect(self.test_lm_studio_connection)
+        test_conn_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #212121;
+                color: #ffffff;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
+            QPushButton:hover {
+                background-color: #333333;
+            }
+        """)
+        proj_layout.addWidget(test_conn_btn)
+        
         proj_layout.addStretch()
         main_layout.addLayout(proj_layout)
+        
+        # Progress Bar Section
+        progress_layout = QHBoxLayout()
+        progress_label = QLabel("PROGRESS >>")
+        progress_label.setStyleSheet("color: #8ae9fd; font-weight: bold; margin-right: 8px;")
+        progress_layout.addWidget(progress_label)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                background-color: #1e1e1e;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                text-align: center;
+                color: #ffffff;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                background-color: #4caf50;
+                border-radius: 3px;
+            }
+        """)
+        progress_layout.addWidget(self.progress_bar, stretch=1)
+        
+        main_layout.addLayout(progress_layout)
         
         # --- VERTICAL SIDEBAR WORKSPACE ---
         body_layout = QHBoxLayout()
@@ -250,6 +374,17 @@ class MainWindow(QMainWindow):
         self.workspace.addWidget(self.token_dashboard)
         self.sidebar.addItem("[+] Dashboard")
 
+        # [3] Conversation Preview Panel
+        self.conversation_preview = ConversationPreviewWidget()
+        self.conversation_preview.process_selected_signal.connect(self.handle_conversation_selection)
+        self.workspace.addWidget(self.conversation_preview)
+        self.sidebar.addItem("[?] Preview")
+
+        # [4] Project History Timeline
+        self.history_timeline = HistoryTimelineWidget()
+        self.workspace.addWidget(self.history_timeline)
+        self.sidebar.addItem("[>] History")
+
         # Load startup settings
         from engine.streaming_processor import token_budget_manager, initialize_settings_from_file
         initialize_settings_from_file()
@@ -283,13 +418,17 @@ class MainWindow(QMainWindow):
             db.close()
 
     def load_project_history_to_screen(self, project_name: str):
-        """Pulls historical context records straight to the terminal if selected."""
-        if not project_name.strip():
+        """Pulls historical context records and loads timeline for the selected project."""
+        clean_name = project_name.strip()
+        
+        # Guard: blank or non-matching names clear the console entirely
+        if not clean_name:
+            self.console_output.clear()
             return
             
         db = SessionLocal()
         try:
-            project = db.query(Project).filter(Project.name == project_name.strip()).first()
+            project = db.query(Project).filter(Project.name == clean_name).first()
             if project:
                 knowledge = get_project_knowledge(db, project.id)
                 if knowledge:
@@ -300,8 +439,67 @@ class MainWindow(QMainWindow):
                 else:
                     self.console_output.clear()
                     self.console_output.append(f"Profile '{project_name}' is active but contains no historical records yet.")
+                
+                # Load the history timeline for this project
+                self.history_timeline.load_timeline(clean_name)
+            else:
+                # Name doesn't match any database entry - clear the view
+                self.console_output.clear()
         finally:
             db.close()
+
+    def test_lm_studio_connection(self):
+        """Test LM Studio API connectivity."""
+        self.console_output.append(">> Testing LM Studio connection...")
+        
+        try:
+            from engine.compression import CompressionEngine
+            engine = CompressionEngine()
+            
+            # Try to list models (health check)
+            response = engine.client.models.list()
+            models = list(response)
+            
+            if models:
+                self.console_output.append(f"✓ SUCCESS: LM Studio is healthy. Available models: {len(models)}")
+                QMessageBox.information(self, "Connection Test", f"LM Studio is connected and ready.\n\nAvailable models: {len(models)}")
+            else:
+                self.console_output.append("⚠ WARNING: LM Studio is running but returned no models")
+                QMessageBox.warning(self, "Connection Test", "LM Studio is running but no models are loaded.\n\nPlease load a model in LM Studio and try again.")
+                
+        except Exception as e:
+            error_msg = str(e)
+            self.console_output.append(f"✗ FAILED: {error_msg}")
+            QMessageBox.critical(self, "Connection Test Failed", f"Unable to connect to LM Studio:\n\n{error_msg}\n\nPlease ensure:\n• LM Studio is running\n• Server is enabled (Settings > Server)\n• Correct port (default: 1234)")
+
+    def handle_conversation_selection(self, selected_messages):
+        """Process only the selected messages from preview panel."""
+        project_name = self.project_input.currentText().strip()
+        
+        if not project_name:
+            QMessageBox.warning(self, "Missing Project Marker", "Please provide a target project name before processing.")
+            return
+        
+        # Lock UI inputs
+        self.drop_zone.setAcceptDrops(False)
+        self.project_input.setEnabled(False)
+        self.copy_btn.setEnabled(False)
+        
+        # Lock preview panel — visible but non-interactive
+        self.conversation_preview.set_locked(True)
+        
+        # Set running indicator
+        self.set_status_indicator("RUNNING")
+        self.progress_bar.setValue(10)
+        
+        # Spawn the processing lifecycle thread with pre-parsed messages
+        self.worker = CompressionWorkerWithMessages(project_name, selected_messages)
+        self.worker.progress_signal.connect(self.update_status_with_phase)
+        self.worker.stats_signal.connect(self._handle_live_stats_update)
+        self.worker.error_signal.connect(self.handle_worker_error)
+        self.worker.finished_signal.connect(self.handle_worker_success)
+        
+        self.worker.start()
 
     def handle_incoming_file(self, filepath: str):
         """Triggered when the drop zone captures a valid file."""
@@ -311,46 +509,75 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Missing Project Marker", "Please provide a target project name before adding raw session data.")
             return
             
-        # Store filepath for potential retry
-        self.pending_filepath = filepath
-        
-        # Lock UI inputs to prevent collision modifications during generation
-        self.drop_zone.setAcceptDrops(False)
-        self.project_input.setEnabled(False)
-        self.copy_btn.setEnabled(False)
-        
-        # Set running indicator (blinking green)
-        self.set_status_indicator("RUNNING")
-        
-        # Spawn the processing lifecycle thread
-        self.worker = CompressionWorker(project_name, filepath)
-        self.worker.progress_signal.connect(self.update_status)
-        self.worker.stats_signal.connect(self._handle_live_stats_update)
-        self.worker.error_signal.connect(self.handle_worker_error)
-        self.worker.finished_signal.connect(self.handle_worker_success)
-        
-        self.worker.start()
-    
+        # Parse messages first to show in preview
+        try:
+            self.console_output.append(">> Parsing conversation file...")
+            messages = parse_lm_studio_file(filepath)
+            self.conversation_preview.load_messages(messages)
+            self.console_output.append(f">> Loaded {len(messages)} messages. Review and select messages to process.")
+            
+            # Store parsed messages for processing when user clicks "Process Selected"
+            self.parsed_messages = messages
+            self.pending_filepath = filepath
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Parse Error", f"Failed to parse conversation file:\n{str(e)}")
+            self.reset_ui_controls()
+            return
+
     def _handle_live_stats_update(self, project_name: str, stats_data: dict):
-        """
-        Handle live statistics updates during chunk processing.
-        Ensures dashboard updates in real-time as chunks are processed.
-        """
+        """Handle live statistics updates during chunk processing."""
         # Update dashboard immediately with live stats
         self.token_dashboard.update_dashboard(project_name, stats_data)
+        
         # Also update console with progress info
         if 'chunks' in stats_data and 'status' in stats_data:
             self.console_output.append(f"\nLive Stats: {stats_data['chunks']} chunks processed, Status: {stats_data['status']}")
 
+    def update_status_with_phase(self, phase: str, message: str):
+        """Update status with phase information and progress bar."""
+        # Update console output
+        self.console_output.append(f">> [{phase}] {message}")
+        
+        # Update progress bar based on phase
+        phase_progress = {
+            "PARSING": 10,
+            "INITIALIZING": 25,
+            "COMPRESSION": 30,  # Will be updated during processing
+            "AUDIT": 85,
+            "COMPLETE": 100,
+            "ERROR": 0
+        }
+        
+        progress_value = phase_progress.get(phase, self.progress_bar.value())
+        if phase == "COMPRESSION":
+            # During compression, we'll update incrementally via stats_signal
+            pass
+        else:
+            self.progress_bar.setValue(progress_value)
+        
+        # Update status indicator based on phase
+        state_map = {
+            "PARSING": "RUNNING",
+            "INITIALIZING": "RUNNING", 
+            "COMPRESSION": "RUNNING",
+            "AUDIT": "RUNNING",
+            "COMPLETE": "SUCCESS",
+            "ERROR": "CRITICAL"
+        }
+        
+        if phase in state_map:
+            self.set_status_indicator(state_map[phase])
+        
+        # Update phase label
+        self.phase_label.setText(phase)
+
     def update_status(self, text: str):
+        """Legacy method for backward compatibility."""
         self.console_output.append(f">> {text}")
 
     def handle_worker_error(self, err_message: str):
-        """
-        Handles pipeline errors with user-friendly notification logic.
-        - Non-critical errors: console output + status bar message
-        - Critical errors: console output + helpful modal popup with retry option
-        """
+        """Handles pipeline errors with user-friendly notification logic."""
         self.console_output.append(f"\nProcessing Interrupted:\n{err_message}\n")
         
         # Determine error severity and show appropriate UI feedback
@@ -393,15 +620,7 @@ class MainWindow(QMainWindow):
             self.reset_ui_controls()
     
     def _get_friendly_error_message(self, err_message: str) -> str:
-        """
-        Converts technical error messages into user-friendly guidance.
-        
-        Args:
-            err_message: The raw error message from the pipeline
-            
-        Returns:
-            A user-friendly error description with actionable guidance
-        """
+        """Converts technical error messages into user-friendly guidance."""
         err_lower = err_message.lower()
         
         if "connection failed" in err_lower or "lm studio" in err_lower:
@@ -450,7 +669,6 @@ class MainWindow(QMainWindow):
         self.console_output.append(pretty_json)
         
         # Always update dashboard with final statistics, even if dashboard_data is empty
-        # The dashboard should reflect the final state after processing completes
         current_stats = {
             'raw_tokens': dashboard_data.get('total_raw_tokens', 0),
             'compressed_tokens': dashboard_data.get('total_compressed_tokens', 0),
@@ -470,6 +688,9 @@ class MainWindow(QMainWindow):
         # Store stats for this project
         self.current_project_stats[project_name] = current_stats
         
+        # Refresh timeline view
+        self.history_timeline.load_timeline(project_name)
+        
         self.refresh_project_dropdown()
         self.project_input.setCurrentText(project_name)
         self.reset_ui_controls()
@@ -479,7 +700,11 @@ class MainWindow(QMainWindow):
         self.drop_zone.setAcceptDrops(True)
         self.project_input.setEnabled(True)
         self.copy_btn.setEnabled(True)
+        # Unlock preview panel
+        self.conversation_preview.set_locked(False)
         # Return to idle state
+        self.progress_bar.setValue(0)
+        self.phase_label.setText("IDLE")
         self.set_status_indicator("IDLE")
     
     def copy_state_to_clipboard(self):
@@ -494,12 +719,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Copy Failed", "The output area is currently empty.")
     
     def set_status_indicator(self, state):
-        """
-        Updates the visual status indicator dot based on application state.
-        Enforces strict runtime safety assertions to ensure background tasks aren't step-interrupted.
-        """
+        """Updates the visual status indicator dot based on application state."""
         # Guard: If a worker thread is running, block external state assignments unless it's an explicit failure/success signal
-        if self.current_state == "RUNNING" and state not in ("SUCCESS", "CRITICAL", "DB_ERROR", "WARNING"):
+        if self.current_state == "RUNNING" and state not in ("SUCCESS", "CRITICAL", "DB_ERROR", "WARNING", "RUNNING"):
             print(f"⚠️ State change request '{state}' rejected. Thread pipeline locked to RUNNING context.")
             return
 
@@ -522,10 +744,7 @@ class MainWindow(QMainWindow):
             self.blink_timer.start(125)
 
     def toggle_blink_indicator(self):
-        """
-        Toggles the status indicator visibility for blinking effect.
-        Used to signal active processing or critical error states.
-        """
+        """Toggles the status indicator visibility for blinking effect."""
         self.blink_visible = not self.blink_visible
         if self.current_state == "RUNNING":
             color = "#4caf50" if self.blink_visible else "#1e3a1e"  # Green to dark green
@@ -537,10 +756,7 @@ class MainWindow(QMainWindow):
         self.status_indicator.setStyleSheet(f"border-radius: 6px; background-color: {color};")
 
     def open_settings_dialog(self):
-        """
-        Opens the dedicated settings dialog window.
-        Pauses interaction with the main window while open.
-        """
+        """Opens the dedicated settings dialog window."""
         from gui.components.settings_dialog import SettingsDialog
         
         dialog = SettingsDialog(self)
@@ -548,15 +764,28 @@ class MainWindow(QMainWindow):
         # Connect the dialog's settings change signal back to the dashboard
         dialog.settings_changed.connect(self.token_dashboard.update_settings)
         
+        # Connect API settings changes to update the engine's client
+        dialog.api_settings.settings_changed.connect(self._on_api_settings_changed)
+        
         # Execute the dialog (this blocks the main window until closed)
         dialog.exec()
+    
+    def _on_api_settings_changed(self, data):
+        """Apply API settings changes to the running configuration."""
+        from config.settings import settings
+        
+        if 'request_timeout' in data:
+            settings.REQUEST_TIMEOUT = data['request_timeout']
+            self.console_output.append(f">> API timeout updated to {data['request_timeout']}s")
+        if 'max_retries' in data:
+            settings.MAX_RETRIES = data['max_retries']
+        if 'retry_base_delay' in data:
+            settings.RETRY_BASE_DELAY = data['retry_base_delay']
+        if 'default_model' in data:
+            settings.DEFAULT_COMPRESSION_MODEL = data['default_model']
 
     def closeEvent(self, event):
-        """
-        Safely captures application shutdown attempts and forces the background worker 
-        through the explicit Quit-Wait lifecycle execution pattern to prevent 
-        'Destroyed while thread is still running' underlying C++ exceptions.
-        """
+        """Safely captures application shutdown attempts and forces the background worker through the explicit Quit-Wait lifecycle execution pattern."""
         if hasattr(self, 'worker') and self.worker is not None:
             try:
                 if self.worker.isRunning():
