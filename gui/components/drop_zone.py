@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import QFrame, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 
-SUPPORTED_EXTENSIONS = ('.txt', '.md', '.pdf', '.json')
+SUPPORTED_EXTENSIONS = ('.txt', '.md')
 
 class DropZone(QFrame):
     """
@@ -32,7 +32,7 @@ class DropZone(QFrame):
         """)
         
         layout = QVBoxLayout(self)
-        self.label = QLabel("Drag & Drop LM Studio Chat Export Here\n(.json, .txt, .md, .pdf)", self)
+        self.label = QLabel("Drag & Drop LM Studio Chat Export Here\n(.txt, .md)", self)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setStyleSheet("color: #aaaaaa; font-size: 14px; font-weight: bold;")
         layout.addWidget(self.label)
