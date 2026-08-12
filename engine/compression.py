@@ -174,6 +174,12 @@ class CompressionEngine:
         if self._deep_compare(base, delta):
             return base
 
+        # Guard: reject deltas that replicate the full state (model regurgitation).
+        # A valid delta should be small; a copy of the prompt is a runaway-feedback signal.
+        if len(delta) > len(base) and len(base) > 0:
+            self.logger.log(f"[WARN] Delta ({len(delta)} keys) larger than current knowledge ({len(base)} keys) - likely model regurgitation, rejecting")
+            return base
+
         for key, value in delta.items():
             if isinstance(value, dict) and key in base and isinstance(base[key], dict):
                 self._deep_merge(base[key], value)
@@ -223,6 +229,7 @@ class CompressionEngine:
                 ],
                 temperature=0.0,
                 response_format={"type": "text"},
+                max_tokens=4096,
                 extra_body={"prompt_quantization": "Q8_0"}
             )
 
@@ -242,7 +249,7 @@ class CompressionEngine:
                 self.logger.log(f"No JSON structure found in LLM response for extraction pass chunk {chunk_index}")
                 return current_knowledge
 
-            delta_payload = self._reconstruct_json(raw_content, f"extraction chunk {chunk_index}")
+            delta_payload = self._reconstruct_json(clean_content, f"extraction chunk {chunk_index}")
             if not delta_payload and json_match:  # empty dict means full failure
                 self.logger.log(f"JSON extraction failed for chunk {chunk_index}, keeping existing knowledge")
                 return current_knowledge
@@ -277,6 +284,7 @@ class CompressionEngine:
                 ],
                 temperature=0.0,
                 response_format={"type": "text"},
+                max_tokens=2048,
                 extra_body={"prompt_quantization": "Q8_0"}
             )
 
@@ -285,7 +293,7 @@ class CompressionEngine:
             # Log the raw AI output for debugging
             self.logger.log_ai_output(f"AUDIT chunk {chunk_index}", raw_content)
 
-            return self._reconstruct_json(raw_content, f"audit chunk {ci}")
+            return self._reconstruct_json(raw_content, f"audit chunk {chunk_index}")
 
         except Exception as e:
             self.logger.log(f"Audit pass warning chunk {chunk_index}: {e}")
