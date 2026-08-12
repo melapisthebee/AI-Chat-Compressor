@@ -29,6 +29,7 @@ class CompressionEngine:
         self.token_budget_manager = token_budget_manager
         self.stats_callback = stats_callback
         self._http_request_count = 0
+        self.logger = RunLogger()  # Available for health checks and all LLM calls
 
     def check_lm_studio_health(self) -> bool:
         try:
@@ -95,6 +96,66 @@ class CompressionEngine:
                 raise
 
         raise last_exception
+
+    def _reconstruct_json(self, raw_content: str, context: str = "") -> Dict[str, Any]:
+        """Unified JSON extraction with 4-stage recovery. Returns parsed dict or {}."""
+        clean = re.sub(r'<(think|thinking|thought)>[\s\S]*?</\1>', '', raw_content, flags=re.IGNORECASE).strip()
+        clean = re.sub(r'\[(think|thinking|thought)\][\s\S]*?\[/\1\]', '', clean, flags=re.IGNORECASE).strip()
+        json_match = re.search(r'(\{[\s\S]*\})', clean)
+        if not json_match:
+            self.logger.log(f"JSON extraction failed ({context}): no JSON structure found")
+            return {}
+
+        json_str = json_match.group(1).strip()
+        attempts: list[str] = []
+
+        # Stage 1: direct parse
+        try:
+            result = json.loads(json_str)
+            if attempts:
+                self.logger.log(f"JSON recovered {context}: attempt {len(attempts)+1} ({attempts[0].split(':')[0]})")
+            return result
+        except json.JSONDecodeError as e:
+            attempts.append(f"direct: {e}")
+
+        # Stage 2: quote normalization
+        try:
+            result = json.loads(json_str.replace("'", '"'))
+            attempts.append("quotes")
+            self.logger.log(f"JSON recovered {context}: attempt {len(attempts)} (quote normalization)")
+            return result
+        except Exception as e:
+            attempts.append(f"quotes: {e}")
+
+        # Stage 3: json-repair library
+        if JSON_REPAIR_AVAILABLE:
+            try:
+                repaired = repair_json(json_str, return_objects=False)
+                result = json.loads(repaired)
+                attempts.append("json-repair")
+                self.logger.log(f"JSON recovered {context}: attempt {len(attempts)} (json-repair)")
+                return result
+            except Exception as e:
+                attempts.append(f"json-repair: {e}")
+        else:
+            attempts.append("json-repair: not installed")
+
+        # Stage 4: trailing content removal
+        try:
+            cleaned = re.sub(r'[,}\]\s]*$', '', json_str)
+            result = json.loads(cleaned)
+            attempts.append("trailing cleanup")
+            self.logger.log(f"JSON recovered {context}: attempt {len(attempts)} (trailing removal)")
+            return result
+        except Exception as e:
+            attempts.append(f"trailing: {e}")
+
+        self.logger.log(f"JSON Recovery Failed {context} after {len(attempts)} attempts")
+        for a in attempts:
+            self.logger.log(f"   - {a}")
+        if len(json_str) > 200:
+            self.logger.log(f"   Content preview: {json_str[:200]}...")
+        return {}
 
     def _deep_compare(self, base: Dict[str, Any], delta: Dict[str, Any]) -> bool:
         if set(base.keys()) != set(delta.keys()):
@@ -181,40 +242,10 @@ class CompressionEngine:
                 self.logger.log(f"No JSON structure found in LLM response for extraction pass chunk {chunk_index}")
                 return current_knowledge
 
-            raw_json_str = json_match.group(1).strip()
-            recovery_attempts = []
-
-            try:
-                delta_payload = json.loads(raw_json_str)
-                recovery_attempts.append("Attempt 1: Direct parse successful")
-            except json.JSONDecodeError as e:
-                recovery_attempts.append(f"Attempt 1 (direct): {str(e)}")
-                try:
-                    fixed_json_str = raw_json_str.replace("'", '"')
-                    delta_payload = json.loads(fixed_json_str)
-                    recovery_attempts.append("Attempt 2: Quote normalization successful")
-                except Exception as e:
-                    recovery_attempts.append(f"Attempt 2 (quotes): {str(e)}")
-                    if JSON_REPAIR_AVAILABLE:
-                        try:
-                            repaired_str = repair_json(raw_json_str, return_objects=False)
-                            delta_payload = json.loads(repaired_str)
-                            recovery_attempts.append("Attempt 3: json-repair successful")
-                        except Exception as e:
-                            recovery_attempts.append(f"Attempt 3 (json-repair): {str(e)}")
-                            self.logger.log(f"JSON Recovery Failed in extraction pass chunk {chunk_index} after {len(recovery_attempts)} attempts:")
-                            for attempt in recovery_attempts:
-                                self.logger.log(f"   - {attempt}")
-                            return current_knowledge
-                    else:
-                        recovery_attempts.append("Attempt 3: Skipped (json-repair not installed)")
-                        self.logger.log(f"JSON Recovery Failed in extraction pass chunk {chunk_index} after {len(recovery_attempts)} attempts")
-                        for attempt in recovery_attempts:
-                            self.logger.log(f"   - {attempt}")
-                        return current_knowledge
-
-            if len(recovery_attempts) > 1:
-                self.logger.log(f"JSON extracted after {len(recovery_attempts)} recovery attempts (chunk {chunk_index})")
+            delta_payload = self._reconstruct_json(raw_content, f"extraction chunk {chunk_index}")
+            if not delta_payload and json_match:  # empty dict means full failure
+                self.logger.log(f"JSON extraction failed for chunk {chunk_index}, keeping existing knowledge")
+                return current_knowledge
 
             return self._deep_merge(current_knowledge, delta_payload)
 
@@ -254,76 +285,13 @@ class CompressionEngine:
             # Log the raw AI output for debugging
             self.logger.log_ai_output(f"AUDIT chunk {chunk_index}", raw_content)
 
-            return self._extract_json_from_response(raw_content)
+            return self._reconstruct_json(raw_content, f"audit chunk {ci}")
 
         except Exception as e:
             self.logger.log(f"Audit pass warning chunk {chunk_index}: {e}")
             return {}
 
-    def _extract_json_from_response(self, content: str) -> Dict[str, Any]:
-        clean_content = re.sub(r'<(think|thinking|thought)>[\s\S]*?</\1>', '', content, flags=re.IGNORECASE).strip()
-        clean_content = re.sub(r'\[(think|thinking|thought)\][\s\S]*?\[/\1\]', '', clean_content, flags=re.IGNORECASE).strip()
-
-        json_match = re.search(r'(\{[\s\S]*\})', clean_content)
-        if not json_match:
-            return {}
-
-        json_str = json_match.group(1).strip()
-        recovery_attempts = []
-
-        try:
-            result = json.loads(json_str)
-            if recovery_attempts:
-                self.logger.log(f"JSON recovered on attempt {len(recovery_attempts) + 1}: Direct parse")
-            return result
-        except json.JSONDecodeError as e:
-            recovery_attempts.append(f"Attempt 1 (direct): {str(e)}")
-
-        try:
-            fixed_str = json_str.replace("'", '"')
-            result = json.loads(fixed_str)
-            recovery_attempts.append("Attempt 2: Single-quote replacement")
-            self.logger.log(f"JSON recovered on attempt {len(recovery_attempts)}: Quote normalization")
-            return result
-        except Exception as e:
-            recovery_attempts.append(f"Attempt 2 (quotes): {str(e)}")
-
-        if JSON_REPAIR_AVAILABLE:
-            try:
-                repaired_str = repair_json(json_str, return_objects=False)
-                result = json.loads(repaired_str)
-                recovery_attempts.append("Attempt 3: json-repair character-level correction")
-                self.logger.log(f"JSON recovered on attempt {len(recovery_attempts)}: json-repair library")
-                return result
-            except Exception as e:
-                recovery_attempts.append(f"Attempt 3 (json-repair): {str(e)}")
-        else:
-            recovery_attempts.append("Attempt 3: json-repair not installed")
-
-        try:
-            clean_str = re.sub(r'[,}\]\s]*$', '', json_str)
-            result = json.loads(clean_str)
-            recovery_attempts.append("Attempt 4: Trailing content removal")
-            self.logger.log(f"JSON recovered on attempt {len(recovery_attempts)}: Trailing cleanup")
-            return result
-        except Exception as e:
-            recovery_attempts.append(f"Attempt 4 (trailing): {str(e)}")
-
-        error_log = "\n".join(recovery_attempts)
-        self.logger.log(f"JSON Recovery Failed after all attempts:")
-        self.logger.log(f"   Original content length: {len(json_str)} chars")
-        self.logger.log(f"   Recovery attempts:\n{error_log}")
-        if len(json_str) > 200:
-            self.logger.log(f"   First 200 chars: {json_str[:200]}...")
-        else:
-            self.logger.log(f"   Content: {json_str}")
-
-        return {}
-
     def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str) -> Dict[str, Any]:
-        # Initialize per-run logger
-        self.logger = RunLogger()
-
         # Health check before starting
         self.logger.log("Checking LM Studio connectivity...")
         if not self.check_lm_studio_health():

@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QRect
 from PyQt6.QtGui import QFont, QColor
 
-from database.connection import SessionLocal
+from database.connection import get_thread_session
 
 
 class TimelineEvent:
@@ -126,82 +126,59 @@ class HistoryTimelineWidget(QFrame):
         """
     
     def load_timeline(self, project_name=None):
-        """Load processing history for the current project."""
         if project_name:
             self.current_project_name = project_name
-        
         if not self.current_project_name:
             self.clear_timeline()
             return
-        
-        db = SessionLocal()
-        try:
+
+        with get_thread_session() as db:
             from database.models import Project, Session as ChatSession
             from sqlalchemy import desc
-            
+
             project = db.query(Project).filter(Project.name == self.current_project_name).first()
-            
             if not project:
                 self.clear_timeline()
                 return
-            
-            # Get all sessions for this project ordered by date
+
             session_records = db.query(ChatSession)\
                 .filter(ChatSession.project_id == project.id)\
                 .order_by(desc(ChatSession.imported_at))\
                 .all()
-            
+
             self.timeline_events = []
-            
+
             for session in session_records:
-                # Count knowledge categories from the snapshot
                 categories_count = 0
                 try:
                     snapshot = getattr(session, 'knowledge_snapshot', None)
                     if snapshot:
                         import json
-                        if isinstance(snapshot, str):
-                            knowledge = json.loads(snapshot)
-                        else:
-                            knowledge = snapshot
+                        knowledge = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
                         if isinstance(knowledge, dict):
                             categories_count = len(knowledge)
                 except Exception:
-                    categories_count = 0
-                
+                    pass
+
                 raw_tokens = session.raw_token_count or 0
                 compressed_tokens = session.compressed_token_count or 0
                 ratio = (compressed_tokens / raw_tokens * 100) if raw_tokens > 0 else 0.0
-                
+
                 event = TimelineEvent(
-                    session_id=session.id,
-                    timestamp=session.imported_at,
-                    raw_tokens=raw_tokens,
-                    compressed_tokens=compressed_tokens,
-                    ratio=ratio,
-                    filename=session.filename,
+                    session_id=session.id, timestamp=session.imported_at,
+                    raw_tokens=raw_tokens, compressed_tokens=compressed_tokens,
+                    ratio=ratio, filename=session.filename,
                     knowledge_categories=categories_count
                 )
                 self.timeline_events.append(event)
-                
-                # Cache the snapshot for quick access
                 self.session_details_cache[session.id] = {
-                    'filename': session.filename,
-                    'timestamp': session.imported_at,
-                    'raw_tokens': raw_tokens,
-                    'compressed_tokens': compressed_tokens,
-                    'ratio': ratio,
-                    'categories_count': categories_count,
-                    'snapshot': snapshot
+                    'filename': session.filename, 'timestamp': session.imported_at,
+                    'raw_tokens': raw_tokens, 'compressed_tokens': compressed_tokens,
+                    'ratio': ratio, 'categories_count': categories_count, 'snapshot': snapshot
                 }
-            
+
             self.render_timeline()
             self.update_summary_stats()
-            
-        except Exception as e:
-            print(f"Error loading timeline: {e}")
-        finally:
-            db.close()
     
     def render_timeline(self):
         """Render the timeline events."""
@@ -345,17 +322,13 @@ class HistoryTimelineWidget(QFrame):
             self._load_and_show_session_details(event)
     
     def _load_and_show_session_details(self, event):
-        """Load session details from database and show them."""
-        db = SessionLocal()
-        try:
+        with get_thread_session() as db:
             from database.models import Session as ChatSession
             session = db.query(ChatSession).filter(ChatSession.id == event.session_id).first()
-            
             if session:
                 snapshot = getattr(session, 'knowledge_snapshot', None)
                 details = {
-                    'filename': session.filename,
-                    'timestamp': session.imported_at,
+                    'filename': session.filename, 'timestamp': session.imported_at,
                     'raw_tokens': session.raw_token_count,
                     'compressed_tokens': session.compressed_token_count,
                     'ratio': (session.compressed_token_count / session.raw_token_count * 100) if session.raw_token_count > 0 else 0,
@@ -365,10 +338,6 @@ class HistoryTimelineWidget(QFrame):
                 self._show_session_details(event, details)
             else:
                 QMessageBox.warning(self, "Session Not Found", f"Session #{event.session_id} not found in database.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load session details:\n{str(e)}")
-        finally:
-            db.close()
     
     def _show_session_details(self, event, details):
         """Show a dialog with the session's knowledge categories."""

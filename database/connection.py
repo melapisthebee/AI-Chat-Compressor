@@ -1,5 +1,6 @@
 import threading
-from sqlalchemy import create_engine
+from contextlib import contextmanager
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from config.settings import settings
 from database.models import Base
@@ -8,12 +9,22 @@ from database.models import Base
 DATABASE_URL = f"sqlite:///{settings.DATABASE_PATH}"
 
 engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False, "timeout": 30}  # Crucial for multi-threaded GUI setups with timeout protection
+    DATABASE_URL,
+    connect_args={"timeout": 30},
+    pool_pre_ping=True  # Detect stale connections before use
 )
 
-# Global mutex for thread-safe database write operations
-db_write_lock = threading.Lock()
+# Thread-local storage: one session per thread, no cross-thread sharing
+import contextvars
+_thread_local = threading.local()
+
+# Enable WAL mode for better concurrent read/write performance
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -21,10 +32,25 @@ def init_db():
     """Creates the SQLite database structure if it doesn't exist yet."""
     Base.metadata.create_all(bind=engine)
 
+@contextmanager
 def get_db_session():
-    """Context utility for scoping transactional queries cleanly."""
-    session = SessionLocal()
+    """Context manager yielding a thread-local session; auto-closes on exit."""
+    if not hasattr(_thread_local, 'session') or _thread_local.session is None:
+        _thread_local.session = SessionLocal()
     try:
-        yield session
+        yield _thread_local.session
     finally:
-        session.close()
+        # Only close when the thread exits, not per-call
+        pass
+
+def get_thread_session():
+    """Get (or create) the session for the current thread."""
+    if not hasattr(_thread_local, 'session') or _thread_local.session is None:
+        _thread_local.session = SessionLocal()
+    return _thread_local.session
+
+def close_thread_session():
+    """Close the thread-local session (call at end of worker threads)."""
+    if hasattr(_thread_local, 'session') and _thread_local.session is not None:
+        _thread_local.session.close()
+        _thread_local.session = None

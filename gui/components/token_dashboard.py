@@ -193,11 +193,11 @@ class TokenDashboardWidget(QFrame):
         self.label_avg_processing_time.setText(f"Avg Processing Time\n{avg_time:.2f}s")
         
         max_tokens = self.settings.get('max_target_tokens', 10000)
-        usage_percent = min((total_raw / max_tokens) * 100, 100) if max_tokens > 0 else 0
+        usage_percent = min((total_compressed / max_tokens) * 100, 100) if max_tokens > 0 else 0
         self.budget_progress.setValue(int(usage_percent))
         
         if self.budget_label:
-            self.budget_label.setText(f"{total_raw:,} / {max_tokens:,} tokens used")
+            self.budget_label.setText(f"{total_compressed:,} / {max_tokens:,} tokens used")
         
         self._update_stats_table()
         QApplication.processEvents()
@@ -261,12 +261,12 @@ class TokenDashboardWidget(QFrame):
     
     def update_settings(self, new_settings: dict):
         self.settings = new_settings.copy()
-        total_raw = sum(s.get('raw_tokens', 0) for s in self.project_stats.values())
+        total_compressed = sum(s.get('compressed_tokens', 0) for s in self.project_stats.values())
         max_tokens = new_settings.get('max_target_tokens', 10000)
-        usage_percent = min((total_raw / max_tokens) * 100, 100) if max_tokens > 0 else 0
+        usage_percent = min((total_compressed / max_tokens) * 100, 100) if max_tokens > 0 else 0
         self.budget_progress.setValue(int(usage_percent))
         if self.budget_label:
-            self.budget_label.setText(f"{total_raw:,} / {max_tokens:,} tokens used")
+            self.budget_label.setText(f"{total_compressed:,} / {max_tokens:,} tokens used")
 
 
 class TokenBudgetSettingsWidget(QFrame):

@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QCo
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QFont
 
-from database.connection import SessionLocal, init_db
+from database.connection import init_db, get_thread_session, close_thread_session, SessionLocal
 from database.queries import get_or_create_project, list_all_projects, get_project_knowledge
 from database.models import Project
 from engine.compression import CompressionEngine
@@ -32,19 +32,19 @@ class CompressionWorker(QThread):
         self.filepath = filepath
 
     def run(self):
-        db = SessionLocal()
+        db = get_thread_session()
         try:
             self.progress_signal.emit("PARSING", "Parsing source conversation log export file...")
             messages = parse_lm_studio_file(self.filepath)
             print(f"Parsed {len(messages)} messages from file")
             filename = os.path.basename(self.filepath)
-            
+
             self.progress_signal.emit("INITIALIZING", f"Retrieving or constructing Project: '{self.project_name}'...")
             project = get_or_create_project(db, self.project_name)
             print(f"Project '{project.name}' (ID: {project.id}) ready")
-            
+
             self.progress_signal.emit("COMPRESSION", "Running sliding token window synchronization loop through local LLM...")
-            
+
             def _live_stats(raw_tokens, compressed_tokens, ratio, chunks_processed):
                 stats_data = {
                     'raw_tokens': raw_tokens,
@@ -53,17 +53,14 @@ class CompressionWorker(QThread):
                     'chunks': chunks_processed,
                     'status': 'Processing'
                 }
-                # Emit signal to update dashboard in real-time
                 self.stats_signal.emit(self.project_name, stats_data)
-            
+
             engine = CompressionEngine(stats_callback=_live_stats)
-            
-            # Runs the dynamic context synchronization with streaming support
+
             print("\nStarting compression engine process_and_adapt()...")
             self.progress_signal.emit("COMPRESSION", "Processing chunks through LLM extraction pass...")
             result = engine.process_and_adapt(db, project.id, messages, filename)
-            
-            # Handle both old and new return formats
+
             if isinstance(result, dict):
                 updated_knowledge = result.get('knowledge', result)
                 dashboard_data = result.get('dashboard_data', {})
@@ -75,9 +72,9 @@ class CompressionWorker(QThread):
                 updated_knowledge = result
                 dashboard_data = {}
                 processing_stats = {}
-            
+
             self.progress_signal.emit("AUDIT", "Finalizing and committing knowledge updates...")
-                
+
             self.finished_signal.emit(updated_knowledge, self.project_name, dashboard_data)
         except Exception as e:
             import traceback
@@ -86,7 +83,7 @@ class CompressionWorker(QThread):
             self.progress_signal.emit("ERROR", str(e))
             self.error_signal.emit(str(e))
         finally:
-            db.close()
+            close_thread_session()
 
 
 class CompressionWorkerWithMessages(QThread):
@@ -105,14 +102,14 @@ class CompressionWorkerWithMessages(QThread):
         self.messages = messages
 
     def run(self):
-        db = SessionLocal()
+        db = get_thread_session()
         try:
             self.progress_signal.emit("INITIALIZING", f"Retrieving or constructing Project: '{self.project_name}'...")
             project = get_or_create_project(db, self.project_name)
             print(f"Project '{project.name}' (ID: {project.id}) ready")
-            
+
             self.progress_signal.emit("COMPRESSION", "Running sliding token window synchronization loop through local LLM...")
-            
+
             def _live_stats(raw_tokens, compressed_tokens, ratio, chunks_processed):
                 stats_data = {
                     'raw_tokens': raw_tokens,
@@ -122,16 +119,15 @@ class CompressionWorkerWithMessages(QThread):
                     'status': 'Processing'
                 }
                 self.stats_signal.emit(self.project_name, stats_data)
-            
+
             engine = CompressionEngine(stats_callback=_live_stats)
-            
-            # Use a dummy filename since we're processing pre-parsed messages
+
             filename = "selected_messages"
-            
+
             print("\nStarting compression engine process_and_adapt()...")
             self.progress_signal.emit("COMPRESSION", f"Processing {len(self.messages)} selected messages through LLM extraction pass...")
             result = engine.process_and_adapt(db, project.id, self.messages, filename)
-            
+
             if isinstance(result, dict):
                 updated_knowledge = result.get('knowledge', result)
                 dashboard_data = result.get('dashboard_data', {})
@@ -139,9 +135,9 @@ class CompressionWorkerWithMessages(QThread):
             else:
                 updated_knowledge = result
                 dashboard_data = {}
-            
+
             self.progress_signal.emit("AUDIT", "Finalizing and committing knowledge updates...")
-                
+
             self.finished_signal.emit(updated_knowledge, self.project_name, dashboard_data)
         except Exception as e:
             import traceback
@@ -150,7 +146,7 @@ class CompressionWorkerWithMessages(QThread):
             self.progress_signal.emit("ERROR", str(e))
             self.error_signal.emit(str(e))
         finally:
-            db.close()
+            close_thread_session()
 
 
 class MainWindow(QMainWindow):
@@ -404,9 +400,7 @@ class MainWindow(QMainWindow):
 
 
     def refresh_project_dropdown(self):
-        """Queries the database to hydrate the combobox profile selectors."""
-        db = SessionLocal()
-        try:
+        with get_thread_session() as db:
             projects = list_all_projects(db)
             self.project_input.blockSignals(True)
             self.project_input.clear()
@@ -414,20 +408,14 @@ class MainWindow(QMainWindow):
                 self.project_input.addItem(p.name)
             self.project_input.setCurrentIndex(-1)
             self.project_input.blockSignals(False)
-        finally:
-            db.close()
 
     def load_project_history_to_screen(self, project_name: str):
-        """Pulls historical context records and loads timeline for the selected project."""
         clean_name = project_name.strip()
-        
-        # Guard: blank or non-matching names clear the console entirely
         if not clean_name:
             self.console_output.clear()
             return
-            
-        db = SessionLocal()
-        try:
+
+        with get_thread_session() as db:
             project = db.query(Project).filter(Project.name == clean_name).first()
             if project:
                 knowledge = get_project_knowledge(db, project.id)
@@ -439,14 +427,9 @@ class MainWindow(QMainWindow):
                 else:
                     self.console_output.clear()
                     self.console_output.append(f"Profile '{project_name}' is active but contains no historical records yet.")
-                
-                # Load the history timeline for this project
                 self.history_timeline.load_timeline(clean_name)
             else:
-                # Name doesn't match any database entry - clear the view
                 self.console_output.clear()
-        finally:
-            db.close()
 
     def test_lm_studio_connection(self):
         """Test LM Studio API connectivity."""
