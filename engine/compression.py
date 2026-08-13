@@ -258,7 +258,7 @@ class CompressionEngine:
                 missing[category] = content
         if missing:
             self.logger.log(f"[AUDIT] chunk {chunk_index}: found {len(missing)} categories with no keyword match in source")
-        return {}  # audit only flags; extraction pass owns the mutations
+        return missing  # return flagged categories for caller to handle
 
     def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str) -> Dict[str, Any]:
         # Health check before starting

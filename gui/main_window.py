@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QCo
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QFont
 
-from database.connection import init_db, get_thread_session, close_thread_session, SessionLocal
+from database.connection import init_db, get_thread_session, close_thread_session
 from database.queries import get_or_create_project, list_all_projects, get_project_knowledge
 from database.models import Project
 from engine.compression import CompressionEngine
