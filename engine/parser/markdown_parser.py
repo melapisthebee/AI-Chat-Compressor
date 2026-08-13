@@ -2,6 +2,7 @@
 Markdown Parser Module - Dedicated parsing logic for Markdown files
 """
 
+import html
 import re
 from typing import List, Dict
 
@@ -25,6 +26,9 @@ class MarkdownParser(BaseParser):
         Returns:
             List of normalized message dictionaries with 'role' and 'content' keys
         """
+        # Decode HTML entities (e.g. &lt;system_directive&gt;) before any parsing
+        content = html.unescape(content)
+        
         # First remove thought blocks while preserving code blocks
         content = self._strip_thought_blocks_safely(content)
 
@@ -42,8 +46,8 @@ class MarkdownParser(BaseParser):
         
         temp_content = re.sub(code_block_pattern, save_code_block, content)
         
-        # Pattern to detect role markers (can be headers or inline)
-        pattern = re.compile(r'(?mi)^(#{1,6}\s*)?(###\s+)?(user|assistant|ai|system|human|bot|prompt|response):\s*', re.MULTILINE)
+        # Pattern to detect role markers (heading + role name, colon optional)
+        pattern = re.compile(r'^(#{1,6}\s+)(user|assistant|ai|system|tool|human|bot|prompt|response):?\s*', re.IGNORECASE | re.MULTILINE)
         all_matches = list(pattern.finditer(temp_content))
 
         cleaned_messages = []
@@ -52,7 +56,7 @@ class MarkdownParser(BaseParser):
             start_idx = match.end()
             end_idx = all_matches[i+1].start() if i + 1 < len(all_matches) else len(temp_content)
             
-            role = match.group(3).lower()
+            role = match.group(2).lower()
             # Normalize role names
             if role in ('human', 'user', 'prompt'):
                 role = 'user'
