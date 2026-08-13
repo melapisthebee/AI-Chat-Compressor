@@ -33,6 +33,7 @@ class CompressionEngine:
 
     def check_lm_studio_health(self) -> bool:
         try:
+            self._http_request_count += 1
             response = self.client.models.list()
             models = list(response)
             if models:
@@ -157,35 +158,22 @@ class CompressionEngine:
             self.logger.log(f"   Content preview: {json_str[:200]}...")
         return {}
 
-    def _deep_compare(self, base: Dict[str, Any], delta: Dict[str, Any]) -> bool:
-        if set(base.keys()) != set(delta.keys()):
-            return False
-        for key in base.keys():
-            if key not in delta:
-                return False
-            if isinstance(base[key], dict) and isinstance(delta[key], dict):
-                if not self._deep_compare(base[key], delta[key]):
-                    return False
-            elif base[key] != delta[key]:
-                return False
-        return True
-
     def _deep_merge(self, base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
-        if self._deep_compare(base, delta):
-            return base
-
         # Guard: reject deltas that replicate the full state (model regurgitation).
-        # A valid delta should be small; a copy of the prompt is a runaway-feedback signal.
         if len(delta) > len(base) and len(base) > 0:
             self.logger.log(f"[WARN] Delta ({len(delta)} keys) larger than current knowledge ({len(base)} keys) - likely model regurgitation, rejecting")
-            return base
+            return dict(base)  # return copy so caller never mutates
 
+        if not delta:
+            return dict(base)
+
+        merged = dict(base)
         for key, value in delta.items():
-            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                self._deep_merge(base[key], value)
+            if isinstance(value, dict) and key in merged and isinstance(merged[key], dict):
+                merged[key] = self._deep_merge(merged[key], value)
             else:
-                base[key] = value
-        return base
+                merged[key] = value
+        return merged
 
     def _call_llm_for_knowledge_merge(self, current_knowledge: Dict[str, Any], raw_chunk: str, chunk_index: int) -> Dict[str, Any]:
         system_prompt = (
@@ -259,45 +247,18 @@ class CompressionEngine:
         except Exception as e:
             raise RuntimeError(f"LM Studio API Connection Failure: {str(e)}")
 
-    def _call_llm_for_verification(self, current_knowledge: Dict[str, Any], raw_chunk: str, chunk_index: int) -> Dict[str, Any]:
-        system_prompt = (
-            "You are a Quality Assurance Auditor for an LLM Knowledge extraction system.\n"
-            "Your task is to compare an existing Knowledge State against a Raw Text Chunk.\n"
-            "1. If the knowledge state is comprehensive and accurate based on the chunk, return an empty JSON object: {}\n"
-            "2. If the chunk contains critical information NOT present in the knowledge state, OR if the state contains hallucinations contradicted by the chunk, output a JSON object with ONLY the corrections/additions.\n"
-            "3. Do not replicate the full state. Output only the delta (key-value pairs to update or add).\n"
-            "4. Never output conversational text, explanations, or markdown fences. Return valid JSON only."
-        )
-
-        user_payload = {
-            "Draft Knowledge State": current_knowledge,
-            "Source Text Chunk": raw_chunk
-        }
-
-        try:
-            response = self._call_llm_with_retry(
-                self.client.chat.completions.create,
-                model=settings.DEFAULT_COMPRESSION_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": json.dumps(user_payload, indent=2)}
-                ],
-                temperature=0.0,
-                response_format={"type": "text"},
-                max_tokens=2048,
-                extra_body={"prompt_quantization": "Q8_0"}
-            )
-
-            raw_content = response.choices[0].message.content.strip()
-
-            # Log the raw AI output for debugging
-            self.logger.log_ai_output(f"AUDIT chunk {chunk_index}", raw_content)
-
-            return self._reconstruct_json(raw_content, f"audit chunk {chunk_index}")
-
-        except Exception as e:
-            self.logger.log(f"Audit pass warning chunk {chunk_index}: {e}")
-            return {}
+    def _local_audit(self, current_knowledge: Dict[str, Any], raw_chunk: str, chunk_index: int) -> Dict[str, Any]:
+        """Local (no API call) audit: finds knowledge keys whose keywords are absent from the chunk.
+        Replaces the expensive LLM re-query with a cheap keyword-match check."""
+        missing = {}
+        chunk_lower = raw_chunk.lower()
+        for category, content in current_knowledge.items():
+            keywords = [kw for kw in re.findall(r'\w+', category.lower()) if len(kw) > 3]
+            if keywords and not any(kw in chunk_lower for kw in keywords):
+                missing[category] = content
+        if missing:
+            self.logger.log(f"[AUDIT] chunk {chunk_index}: found {len(missing)} categories with no keyword match in source")
+        return {}  # audit only flags; extraction pass owns the mutations
 
     def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str) -> Dict[str, Any]:
         # Health check before starting
@@ -399,30 +360,17 @@ class CompressionEngine:
         except Exception as e:
             raise RuntimeError(f"Error during extraction processing: {str(e)}") from e
 
-        # ---- PASS 2: AUDIT (all chunks) ----
-        self.logger.log("=== PASS 2: AUDIT ===")
+        # ---- PASS 2: LOCAL AUDIT (no API calls) ----
+        self.logger.log("=== PASS 2: LOCAL AUDIT ===")
 
-        audit_logical_call_count = 0
         chunk_indices = sorted(chunk_texts.keys())
-
         for ci in chunk_indices:
             decoded_chunk = chunk_texts[ci]
-            self.logger.log(f"Audit pass on chunk {ci}... [{logical_call_count + audit_logical_call_count} logical calls, {self._http_request_count} HTTP requests]")
-            audit_logical_call_count += 1
+            self._local_audit(active_knowledge, decoded_chunk, ci)
 
-            try:
-                audit_delta = self._call_llm_for_verification(active_knowledge, decoded_chunk, ci)
-                if audit_delta:
-                    self.logger.log(f"   Audit found {len(audit_delta)} corrections/additions for chunk {ci}")
-                    active_knowledge = self._deep_merge(active_knowledge, audit_delta)
-                else:
-                    self.logger.log(f"   Audit found no changes needed for chunk {ci}")
-            except Exception as e:
-                self.logger.log(f"   Audit error on chunk {ci}: {str(e)[:200]}")
-
-        total_logical_calls = logical_call_count + audit_logical_call_count
-        self.logger.log(f"Audit pass completed: {total_chunks} chunks audited, {audit_logical_call_count} logical calls")
-        self.logger.log(f"Total LLM calls this run: {total_logical_calls} logical calls ({self._http_request_count} HTTP requests) ({logical_call_count} extraction + {audit_logical_call_count} audit)")
+        total_logical_calls = logical_call_count
+        self.logger.log(f"Audit pass completed: {total_chunks} chunks audited (local)")
+        self.logger.log(f"Total LLM calls this run: {total_logical_calls} logical calls ({self._http_request_count} HTTP requests)")
 
         # Update processing statistics
         self.streaming_processor.update_stats(

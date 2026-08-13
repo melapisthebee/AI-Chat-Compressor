@@ -20,11 +20,11 @@ class Settings(BaseSettings):
     LM_STUDIO_API_KEY: str = "lm-studio"  # Placeholder token required by the client
     DEFAULT_COMPRESSION_MODEL: str = "meta-llama-3-8b-instruct"
     
-    # --- Token Budgeting Engine Constraints ---
+    # --- Token Budgeting Engine Constraints (power-of-2 boundaries) ---
     TOKEN_ENCODING: str = "cl100k_base"       # Tokenizer matching Llama-3/GPT standard
-    MAX_TARGET_TOKENS: int = 10000            # Hard ceiling for the compressed profile
-    PRESERVE_RECENT_TOKENS: int = 5000        # Unmodified trailing context window budget
-    CHUNK_SIZE_TOKENS: int = 8000             # Segment size for sliding-window compression
+    MAX_TARGET_TOKENS: int = 256 * 1024       # Hard ceiling for the compressed profile
+    PRESERVE_RECENT_TOKENS: int = 4 * 1024    # Unmodified trailing context window budget
+    CHUNK_SIZE_TOKENS: int = 8 * 1024         # Segment size for sliding-window compression
     
     # --- GUI Configurations ---
     WINDOW_WIDTH: int = 1000
@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     
     # --- API Configuration ---
     REQUEST_TIMEOUT: int = 120  # Timeout in seconds for LLM API calls (increased for large conversations)
-    MAX_RETRIES: int = 3  # Maximum retry attempts for transient failures
+    MAX_RETRIES: int = 2  # Maximum retry attempts for transient failures
     RETRY_BASE_DELAY: int = 1  # Base delay in seconds between retries
     
     # Allow overriding configurations cleanly via a local .env file at project root

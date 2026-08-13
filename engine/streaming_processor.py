@@ -38,11 +38,7 @@ class StreamingTokenProcessor:
         """
         self.max_target_tokens = max_target_tokens or settings.MAX_TARGET_TOKENS
         self.chunk_size_tokens = chunk_size_tokens or settings.CHUNK_SIZE_TOKENS
-        # Reduced overlap from 25% to 10% for large chunks to minimize redundant processing
-        if chunk_size_tokens:
-            self.overlap_tokens = overlap_tokens or max(500, int(chunk_size_tokens * 0.10))
-        else:
-            self.overlap_tokens = overlap_tokens or max(500, int(settings.CHUNK_SIZE_TOKENS * 0.10))
+        self.overlap_tokens = overlap_tokens or 2 * 1024
         self.preserve_recent_tokens = preserve_recent_tokens or settings.PRESERVE_RECENT_TOKENS
         
         # Statistics tracking for dashboard
@@ -350,12 +346,12 @@ class TokenBudgetManager:
         self.budget_settings = {
             'max_target_tokens': settings.MAX_TARGET_TOKENS,
             'chunk_size_tokens': settings.CHUNK_SIZE_TOKENS,
-            'overlap_tokens': max(500, settings.CHUNK_SIZE_TOKENS // 4),
+            'overlap_tokens': 2 * 1024,
             'preserve_recent_tokens': settings.PRESERVE_RECENT_TOKENS,
-            'min_chunk_size': 1000,
-            'max_chunk_size': 16000,
-            'min_overlap': 200,
-            'max_overlap_ratio': 0.5  # 50% maximum overlap
+            'min_chunk_size': 512,
+            'max_chunk_size': 8 * 1024,
+            'min_overlap': 512,
+            'max_overlap_ratio': 0.25  # 25% maximum overlap
         }
     
     def validate_settings(self, settings_dict: Dict[str, Any]) -> Tuple[bool, str]:
@@ -375,8 +371,8 @@ class TokenBudgetManager:
             value = settings_dict['max_target_tokens']
             if not isinstance(value, int) or value < 1000:
                 errors.append("max_target_tokens must be an integer >= 1000")
-            elif value > 100000:
-                errors.append("max_target_tokens should not exceed 100,000")
+            elif value > 256 * 1024:
+                errors.append("max_target_tokens should not exceed 262,144 (256K)")
         
         # Validate chunk_size_tokens
         if 'chunk_size_tokens' in settings_dict:
@@ -432,7 +428,10 @@ class TokenBudgetManager:
         if 'chunk_size_tokens' in settings_dict or 'overlap_tokens' in settings_dict:
             chunk_size = self.budget_settings['chunk_size_tokens']
             if self.budget_settings['overlap_tokens'] > chunk_size * self.budget_settings['max_overlap_ratio']:
-                self.budget_settings['overlap_tokens'] = int(chunk_size * self.budget_settings['max_overlap_ratio'])
+                self.budget_settings['overlap_tokens'] = min(
+                    int(chunk_size * self.budget_settings['max_overlap_ratio']),
+                    2 * 1024
+                )
         
         return self.budget_settings.copy()
     
@@ -445,12 +444,12 @@ class TokenBudgetManager:
         self.budget_settings = {
             'max_target_tokens': settings.MAX_TARGET_TOKENS,
             'chunk_size_tokens': settings.CHUNK_SIZE_TOKENS,
-            'overlap_tokens': max(500, settings.CHUNK_SIZE_TOKENS // 4),
+            'overlap_tokens': 2 * 1024,
             'preserve_recent_tokens': settings.PRESERVE_RECENT_TOKENS,
-            'min_chunk_size': 1000,
-            'max_chunk_size': 16000,
-            'min_overlap': 200,
-            'max_overlap_ratio': 0.5
+            'min_chunk_size': 512,
+            'max_chunk_size': 8 * 1024,
+            'min_overlap': 512,
+            'max_overlap_ratio': 0.25
         }
         return self.budget_settings.copy()
     
@@ -531,7 +530,7 @@ def initialize_settings_from_file():
             # Update streaming processor with loaded settings
             streaming_processor.max_target_tokens = saved_settings.get('max_target_tokens', settings.MAX_TARGET_TOKENS)
             streaming_processor.chunk_size_tokens = saved_settings.get('chunk_size_tokens', settings.CHUNK_SIZE_TOKENS)
-            streaming_processor.overlap_tokens = saved_settings.get('overlap_tokens', max(500, int(settings.CHUNK_SIZE_TOKENS * 0.10)))
+            streaming_processor.overlap_tokens = saved_settings.get('overlap_tokens', 2 * 1024)
             streaming_processor.preserve_recent_tokens = saved_settings.get('preserve_recent_tokens', settings.PRESERVE_RECENT_TOKENS)
             print(f"✓ Loaded persisted token settings from file")
         except Exception as e:
