@@ -226,7 +226,6 @@ def run_parser_benchmarks(sample_dir: str = None) -> ParserBenchmark:
     benchmark = ParserBenchmark()
     
     if sample_dir is None:
-        # Default to samples directory in project root
         project_root = Path(__file__).parent.parent.parent
         sample_dir = project_root / "samples"
     
