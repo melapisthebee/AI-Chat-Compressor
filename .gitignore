@@ -16,3 +16,6 @@ storage/archive.db
 # Protected files
 .env
 python-verification/
+nul
+.coverage
+coverage.xml

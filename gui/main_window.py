@@ -381,6 +381,13 @@ class MainWindow(QMainWindow):
         self.workspace.addWidget(self.history_timeline)
         self.sidebar.addItem("[>] History")
 
+        # [5] Knowledge Editor
+        from gui.components.knowledge_editor import KnowledgeEditorWidget
+        self.knowledge_editor = KnowledgeEditorWidget()
+        self.knowledge_editor.changed.connect(self._on_knowledge_edited)
+        self.workspace.addWidget(self.knowledge_editor)
+        self.sidebar.addItem("[~] Editor")
+
         # Load startup settings
         from engine.streaming_processor import token_budget_manager, initialize_settings_from_file
         initialize_settings_from_file()
@@ -486,6 +493,12 @@ class MainWindow(QMainWindow):
 
     def handle_incoming_file(self, filepath: str):
         """Triggered when the drop zone captures a valid file."""
+        # Guard: block if a worker is still running
+        if hasattr(self, 'worker') and self.worker is not None and self.worker.isRunning():
+            QMessageBox.warning(self, "Already Processing",
+                "A compression task is still running. Please wait for it to complete.")
+            return
+
         project_name = self.project_input.currentText().strip()
         
         if not project_name:
@@ -767,6 +780,14 @@ class MainWindow(QMainWindow):
         if 'default_model' in data:
             settings.DEFAULT_COMPRESSION_MODEL = data['default_model']
 
+
+    def _on_knowledge_edited(self):
+        """Refresh timeline/dashboard after manual editor commit."""
+        name = self.project_input.currentText().strip()
+        if name:
+            self.history_timeline.load_timeline(name)
+            self.refresh_project_dropdown()
+
     def closeEvent(self, event):
         """Safely captures application shutdown attempts and forces the background worker through the explicit Quit-Wait lifecycle execution pattern."""
         if hasattr(self, 'worker') and self.worker is not None:
@@ -781,3 +802,4 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"⚠️ Error during worker shutdown: {e}")
         event.accept()
+# Added by: knowledge_editor panel registration (Item 9.3)

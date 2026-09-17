@@ -6,11 +6,12 @@ from typing import Dict, List, Optional, Any, Callable
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
 from database.models import Project, Session as ChatSession, KnowledgeCore
+from engine.tfidf_matcher import match_category, TfidfMatcher
+from engine.knowledge_conflicts import detect_conflicts, summarize_conflicts
 
 
-def retry_on_locked(max_retries: int = 3, base_delay: float = 0.5):
-    """Retry DB operations with exponential backoff on 'database is locked' errors."""
-    def decorator(func: Callable):
+def retry_on_locked(max_retries=3, base_delay=0.5):
+    def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             last_exception = None
@@ -18,11 +19,10 @@ def retry_on_locked(max_retries: int = 3, base_delay: float = 0.5):
                 try:
                     return func(*args, **kwargs)
                 except OperationalError as e:
-                    error_msg = str(e).lower()
-                    if 'database is locked' in error_msg and attempt < max_retries:
+                    if 'database is locked' in str(e).lower() and attempt < max_retries:
                         last_exception = e
                         delay = base_delay * (2 ** attempt)
-                        print(f"⚠️ Database locked, retrying in {delay:.1f}s... (attempt {attempt + 1}/{max_retries})")
+                        print(f"\u26a0\ufe0f DB locked, retry {delay:.1f}s...")
                         time.sleep(delay)
                     else:
                         raise
@@ -31,117 +31,106 @@ def retry_on_locked(max_retries: int = 3, base_delay: float = 0.5):
     return decorator
 
 
-def get_or_create_project(db: Session, project_name: str) -> Project:
-    project = db.query(Project).filter(Project.name == project_name).first()
-    if not project:
-        project = Project(name=project_name)
-        db.add(project)
-        db.commit()
-        db.refresh(project)
-    return project
+def get_or_create_project(db, project_name):
+    p = db.query(Project).filter(Project.name == project_name).first()
+    if not p:
+        p = Project(name=project_name)
+        db.add(p); db.commit(); db.refresh(p)
+    return p
 
 
-def list_all_projects(db: Session) -> List[Project]:
+def list_all_projects(db):
     return db.query(Project).order_by(Project.updated_at.desc()).all()
 
 
-def get_project_knowledge(db: Session, project_id: int) -> Dict[str, Any]:
-    entries = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
-    return {entry.category: entry.content for entry in entries}
+def get_project_knowledge(db, project_id):
+    return {e.category: e.content for e in db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()}
 
 
-def create_session_record(
-    db: Session,
-    project_id: int,
-    filename: str,
-    raw_tokens: int,
-    compressed_tokens: int,
-    knowledge_snapshot: Optional[Dict[str, Any]] = None
-) -> ChatSession:
-    session_record = ChatSession(
-        project_id=project_id,
-        filename=filename,
-        raw_token_count=raw_tokens,
-        compressed_token_count=compressed_tokens,
-        knowledge_snapshot=knowledge_snapshot
-    )
-    db.add(session_record)
-    db.commit()
-    db.refresh(session_record)
-    return session_record
+def create_session_record(db, project_id, filename, raw_tokens, compressed_tokens, knowledge_snapshot=None):
+    s = ChatSession(project_id=project_id, filename=filename, raw_token_count=raw_tokens,
+                    compressed_token_count=compressed_tokens, knowledge_snapshot=knowledge_snapshot)
+    db.add(s); db.commit(); db.refresh(s); return s
 
 
-def update_adaptive_knowledge(
-    db: Session,
-    project_id: int,
-    session_id: int,
-    updated_knowledge: Dict[str, Any],
-    raw_context_stream: Optional[str] = None
-):
-    """Core adaptive engine routine. Updates/creates knowledge categories; skips deletions
-    when the incoming payload is empty (model fault guardrail). Semantic omission check
-    preserves historical records whose keywords don't appear in the raw stream."""
+def edit_knowledge_entry(db, project_id, category, content):
+    r = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id, KnowledgeCore.category == category).first()
+    if not r:
+        r = KnowledgeCore(project_id=project_id, category=category, content=content); db.add(r)
+    else:
+        r.content = content; r.updated_at = datetime.utcnow()
+    db.commit(); db.refresh(r); return r
+
+
+def delete_knowledge_entry(db, project_id, category):
+    r = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id, KnowledgeCore.category == category).first()
+    if r:
+        db.delete(r); db.commit()
+
+
+def update_adaptive_knowledge(db, project_id, session_id, updated_knowledge, raw_context_stream=None):
+    """Core adaptive engine with TF-IDF matching and conflict detection."""
     try:
         if not isinstance(updated_knowledge, dict):
-            print(f"⚠️ Invalid knowledge format: expected dict, got {type(updated_knowledge)}")
+            print(f"\u26a0\ufe0f Invalid knowledge format: {type(updated_knowledge)}")
             return False
-
         if not updated_knowledge:
-            print("⏭️ Skipping database update (empty knowledge delta)")
+            print("\u23ed\ufe0f Skipping update (empty delta)")
             return True
 
-        existing_records = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
-        existing_map = {record.category: record for record in existing_records}
+        existing = db.query(KnowledgeCore).filter(KnowledgeCore.project_id == project_id).all()
+        existing_map = {r.category: r for r in existing}
+        matcher = TfidfMatcher(list(existing_map.keys()), sensitivity=0.6)
 
-        print(f"💾 Database update: Found {len(existing_map)} existing categories")
-        print(f"   Incoming update has {len(updated_knowledge)} categories")
+        print(f"\ud83d\udcbe DB: {len(existing_map)} existing, {len(updated_knowledge)} incoming")
+        added = updated = conflicts = 0
 
-        added_count = 0
-        updated_count = 0
-        for category, fresh_content in updated_knowledge.items():
-            if category in existing_map:
-                record = existing_map[category]
-                record.content = fresh_content
-                record.last_updated_by_session_id = session_id
-                record.updated_at = datetime.utcnow()
-                updated_count += 1
-            else:
-                new_record = KnowledgeCore(
-                    project_id=project_id,
-                    category=category,
-                    content=fresh_content,
-                    last_updated_by_session_id=session_id
-                )
-                db.add(new_record)
-                added_count += 1
+        for cat, content in updated_knowledge.items():
+            if cat in existing_map:
+                old = existing_map[cat].content if isinstance(existing_map[cat].content, dict) else {}
+                c = detect_conflicts(old, content, cat)
+                if c:
+                    print(f"   {summarize_conflicts(c, cat)}"); conflicts += len(c)
+                existing_map[cat].content = content
+                existing_map[cat].last_updated_by_session_id = session_id
+                existing_map[cat].updated_at = datetime.utcnow()
+                updated += 1
+            elif existing_map:
+                ok, best, score = matcher.is_match(cat, list(existing_map.keys()))
+                if ok and best in existing_map:
+                    old = existing_map[best].content if isinstance(existing_map[best].content, dict) else {}
+                    c = detect_conflicts(old, content, best)
+                    if c:
+                        print(f"   {summarize_conflicts(c, best)}"); conflicts += len(c)
+                    existing_map[best].content = content
+                    existing_map[best].last_updated_by_session_id = session_id
+                    existing_map[best].updated_at = datetime.utcnow()
+                    updated += 1
+                    print(f"   Mapped '{cat}' -> '{best}' (score={score:.2f})")
+                    continue
+            rec = KnowledgeCore(project_id=project_id, category=cat, content=content, last_updated_by_session_id=session_id)
+            db.add(rec); added += 1
 
-        print(f"   ✓ Processed: {updated_count} updated, {added_count} added")
+        print(f"   {updated} updated, {added} added, {conflicts} conflicts")
 
-        deleted_count = 0
+        # Deletion: TF-IDF guard replaces bare keyword check
+        del_count = 0
         if updated_knowledge:
-            for category, old_record in existing_map.items():
-                if category not in updated_knowledge:
-                    should_delete = True
+            for cat, rec in existing_map.items():
+                if cat not in updated_knowledge:
                     if raw_context_stream:
-                        normalized_stream = raw_context_stream.lower()
-                        keywords = re.findall(r'\w+', category.lower())
-                        if keywords and not any(kw in normalized_stream for kw in keywords):
-                            should_delete = False
-                    if should_delete:
-                        db.delete(old_record)
-                        deleted_count += 1
+                        ok, _, _ = matcher.is_match(cat, list(updated_knowledge.keys()))
+                        if ok:
+                            continue
+                    db.delete(rec); del_count += 1
+        print(f"   Deleted {del_count}")
 
-        print(f"   ✓ Deleted {deleted_count} obsolete categories")
-
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if project:
-            project.updated_at = datetime.utcnow()
-
+        proj = db.query(Project).filter(Project.id == project_id).first()
+        if proj:
+            proj.updated_at = datetime.utcnow()
         db.commit()
-        print(f"✅ Knowledge base updated successfully")
+        print(f"\u2705 Knowledge base updated")
         return True
-
     except Exception as e:
         db.rollback()
-        print(f"❌ Database update failed: {str(e)}")
-        raise
+        print(f"\u274c DB update failed: {e}"); raise

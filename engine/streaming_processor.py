@@ -453,17 +453,23 @@ class TokenBudgetManager:
         }
         return self.budget_settings.copy()
     
-    def get_dashboard_data(self) -> Dict[str, Any]:
+    def get_dashboard_data(self, processor: Optional['StreamingTokenProcessor'] = None) -> Dict[str, Any]:
         """
         Get dashboard-ready statistics for the GUI.
+        
+        Args:
+            processor: Optional StreamingTokenProcessor instance to pull stats from
+                       (defaults to module-level streaming_processor singleton)
         
         Returns:
             Dictionary with token usage and compression stats
         """
-        raw_tokens = self.stats.get('total_raw_tokens', 0)
-        compressed_tokens = self.stats.get('total_compressed_tokens', 0)
+        if processor is None:
+            processor = streaming_processor
+        raw_tokens = processor.stats.get('total_raw_tokens', 0)
+        compressed_tokens = processor.stats.get('total_compressed_tokens', 0)
         ratio = (compressed_tokens / raw_tokens * 100) if raw_tokens > 0 else 0
-        chunks_processed = self.stats.get('chunks_processed', 0)
+        chunks_processed = processor.stats.get('total_chunks_processed', 0)
         
         return {
             'raw_tokens': raw_tokens,

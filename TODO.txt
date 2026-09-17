@@ -1,70 +1,100 @@
+﻿# LM Compressor - Task List
 
-          8. UI/UX Improvements [COMPLETED]
-            ✓ Add progress bar for long-running compression operations
-            ✓ Create status indicator showing: Idle → Parsing → Compression → Audit → Complete/Error
-            ✓ Implement conversation preview panel before processing
-            ✓ Add "Test Connection" button for LM Studio API validation
-            ✓ Create project history timeline view to visualize knowledge evolution
+## Format
+Each task uses consistent fields for human and AI readability.
+
+**Status values:** OPEN | IN_PROGRESS | COMPLETED | BLOCKED
+**Complexity values:** LOW | MEDIUM | HIGH
+
+---
+
+### Task 10: Multi-file Processing Support
+Name: Multi-file batch processing
+Issue: Currently only single file can be processed at a time
+Additional Details:
+  - Allow batch file drops (multiple conversations)
+  - Queue management for sequential processing
+  - Parallel processing option with configurable workers
+  - Project merge functionality for related conversations
+Status: OPEN
+Complexity: HIGH
+
+### Task 11: Export & Integration Features
+Name: Knowledge export and API integration
+Issue: No way to export knowledge or integrate programmatically
+Additional Details:
+  - Export formats: JSON, Markdown, CSV
+  - Optional API endpoint (Flask/FastAPI) for headless operation
+  - LLM output format selection (JSON, XML, plain text)
+Status: OPEN
+Complexity: MEDIUM
+
+### Task 12: Performance Optimizations
+Name: Performance profiling and optimization
+Issue: Tokenization/compression bottlenecks need identification and fixing
+Additional Details:
+  - [DONE] Caching layer for processed files (hash-based)
+  - [DONE] Profile entry point created (engine/profile.py)
+  - [DONE] Renamed profile.py to benchmark.py (stdlib name collision)
+  - [DONE] Profiled tokenization: 97% time in tiktoken C extension, not Python wrapper
+  - [DONE] Optimized compression.py: eliminated redundant count_tokens calls per chunk
+  - Database connection pooling via SQLAlchemy QueuePool
+  - Compress stored JSON knowledge blobs
+Status: IN_PROGRESS
+Complexity: HIGH
+
+### Task 13: Testing Infrastructure
+Name: Comprehensive test suite
+Issue: Limited test coverage for core engine components
+Additional Details:
+  - [DONE] pytest framework with coverage reporting
+  - [DONE] Unit tests: token counting, credential redaction, knowledge merge, parser formats
+  - [DONE] Created pytest.ini with coverage configuration
+  - [DONE] Created mock LLM service (tests/mock_llm.py)
+  - [DONE] Integration test framework created (tests/test_integration.py)
+  - Integration tests need debugging (response format mismatch)
+Status: IN_PROGRESS
+Complexity: MEDIUM
+
+### Task 14: Documentation & Onboarding
+Name: Complete documentation suite
+Issue: Insufficient docs for API, contributors, and troubleshooting
+Additional Details:
+  - API documentation with OpenAPI/Swagger spec
+  - Developer contribution guide (expand README)
+  - [DONE] Inline code comments in engine/compression.py
+  - [DONE] Added LM Studio troubleshooting FAQ to README
+Status: IN_PROGRESS
+Complexity: LOW
+
+### Task 15: Logging & Monitoring
+Name: Production-grade logging and metrics
+Issue: Uses print statements instead of structured logging
+Additional Details:
+  - Replace print() with Python logging module
+  - Structured JSON log output for parsing
+  - Performance metrics dashboard (tokens processed, compression ratio)
+Status: OPEN
+Complexity: MEDIUM
+
+---
+
+## Completed Tasks (Archive)
+
+### Task 8: UI/UX Improvements [COMPLETED]
+- Progress bar for long-running operations
+- Status indicator (Idle/Parsing/Compression/Audit/Complete/Error)
+- Conversation preview panel
+- Test Connection button for LM Studio API
+- Project history timeline view
+
+### Task 9: Knowledge Core Enhancement [COMPLETED]
+- TF-IDF scoring + prefix-aware token matching + n-gram Jaccard fallback
+- Knowledge conflict detection (engine/knowledge_conflicts.py)
+- Manual knowledge editing interface (KnowledgeEditorWidget, sidebar [~])
+
+---
+
+Last updated: 2026-09-15
 
 
- 9. Knowledge Core Enhancement
-
-  Improve category matching algorithm in update_adaptive_knowledge():
- python
- # Replace simple keyword matching with:
- # - TF-IDF scoring
- # - Semantic similarity (optional embedding model)
- # - Configurable sensitivity thresholds
-  Add knowledge conflict detection when new data contradicts existing records
-  Implement manual knowledge editing interface in GUI
-
-
- 10. Multi-file Processing Support
-  Allow batch file drops (multiple conversations at once)
-  Create queue management system for sequential processing
-  Add parallel processing option with configurable worker count
-  Implement project merge functionality to combine related conversations
-
-
- 11. Export & Integration Features
-  Export knowledge state formats:
- JSON (for programmatic use)
- Markdown (readable documentation)
- CSV (tabular analysis)
-  Add API endpoint for headless operation (Flask/FastAPI optional)
-  Support LLM output format selection (JSON, XML, plain text)
-
-
-2. Performance Optimizations
- Implement caching layer for previously processed files (hash-based detection)
- Profile and optimize tokenization bottlenecks with cProfile/line_profiler
- Add database connection pooling using SQLAlchemy QueuePool
- Compress stored JSON knowledge blobs to reduce storage footprint
-
-
-13. Testing Infrastructure
- Set up pytest framework with coverage reporting
- Create unit tests for:
-Token counting accuracy
-Credential redaction regex patterns
-Knowledge merge logic
-Parser format handling
- Add integration tests for full compression pipelineS
- Implement mock LLM service for offline testing
-
-
-14. Documentation & Onboarding
- Create API documentation with OpenAPI/Swagger spec (if adding API endpoints)
- Write developer contribution guide expanding existing README sections
- Add inline code comments explaining complex logic in engine/compression.py
- Create troubleshooting FAQ for common LM Studio configuration issues
-
-
-15. Logging & Monitoring
- Replace print statements with proper logging:
-python
-import logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
- Add structured log output (JSON format for parsing)
- Create performance metrics dashboard (tokens processed, avg compression ratio, etc.)

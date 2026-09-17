@@ -1,4 +1,4 @@
-### AI Chat Compressor: Keeping The Key Ideas, Without The Bloat
+﻿### AI Chat Compressor: Keeping The Key Ideas, Without The Bloat
 
 </div>
 
@@ -32,11 +32,11 @@ In the age of AI-powered assistants, conversations generate massive amounts of c
 
 With lm-compressor, developers can:
 
-- **Structured Compression** → **Solves Bloat**: Unified context management of conversations based on SQLite database structure
-- **High-Quality Retention** → **Reduces Token Consumption**: Intelligent extraction of key ideas while maintaining conversation integrity
-- **Directory Retrieval** → **Improves Effectiveness**: Supports native filesystem retrieval methods, combining directory positioning with semantic search
-- **Visualized Extraction Trajectory** → **Observable Context**: Track which parts of the conversation were compressed and what key ideas were retained
-- **Automatic Session Management** → **Context Self-Iteration**: Automatically extracts long-term memory from conversations, making agents smarter with use
+- **Structured Compression** â†’ **Solves Bloat**: Unified context management of conversations based on SQLite database structure
+- **High-Quality Retention** â†’ **Reduces Token Consumption**: Intelligent extraction of key ideas while maintaining conversation integrity
+- **Directory Retrieval** â†’ **Improves Effectiveness**: Supports native filesystem retrieval methods, combining directory positioning with semantic search
+- **Visualized Extraction Trajectory** â†’ **Observable Context**: Track which parts of the conversation were compressed and what key ideas were retained
+- **Automatic Session Management** â†’ **Context Self-Iteration**: Automatically extracts long-term memory from conversations, making agents smarter with use
 
 ## Quick Start
 
@@ -176,7 +176,7 @@ then you must AT LEAST be able to write in your own words what the added/modifie
 
 This is for everyone's benefit. You get to Vibe-Code, so we get to verify.
 
-### Contributors ✨
+### Contributors âœ¨
 
 - **MelapisTheBee** - Core developer and maintainer
 
@@ -200,8 +200,31 @@ This is for everyone's benefit. You get to Vibe-Code, so we get to verify.
 **A**: Please use the [GitHub Issues](https://github.com/melapisthebee/AI-Chat-Compressor/issues) page. Be sure to include detailed information about your setup, steps to reproduce, and expected behavior!
 
 
+
+### Q: LM Compressor cannot connect to LM Studio. What should I do?
+**A**: Follow these troubleshooting steps:
+1. Ensure LM Studio is running and a model is loaded
+2. Verify the API server is enabled in LM Studio settings (Server tab)
+3. Check that the port matches your .env configuration (default: 1234)
+4. Test connectivity manually: curl http://localhost:1234/v1/models
+5. Ensure no firewall is blocking local connections
+
+### Q: I get \"No models available\" error. How do I fix it?
+**A**: 
+1. Download a model in LM Studio (recommended: qwen3-4b-instruct-2507)
+2. Load the model before running lm-compressor
+3. Verify the model appears in LM Studio's model list
+
+### Q: Compression is very slow. Can it be optimized?
+**A**: 
+1. Use a smaller/faster model for initial testing
+2. Increase chunk size in settings (trade-off: more context per call)
+3. Check system resources - compression is CPU and memory intensive
+4. For large files, expect longer processing times
+
 ## License
 
 The AI Chat Compressor project uses the GNU Affero General Public License, version 3 (AGPLv3). See [GNU-AGPL-3.0.md](./GNU-AGPL-3.0.md) for details.
 
 <!-- Link Definitions -->
+

@@ -59,7 +59,8 @@ class BaseParser(ABC):
         if len(lines) <= max_lines:
             return content
 
-        is_tool_block = any(tag in content for tag in ["", "","<function=", "jsonrpc"])
+        is_tool_block = any(tag in content for tag in ["<function=", "jsonrpc", "toolCall", "Tool Call"])
+
         path_regex = r'(^[a-fA-F0-9_-]{12,})|([A-Za-z]:\\[\w\.-]+\\[\w\.-]+)|(/[\w\.-]+/[\w\.-]+)'
         hex_or_path_lines = [l for l in lines if re.search(path_regex, l)]
         is_data_dump = len(hex_or_path_lines) / len(lines) > 0.5

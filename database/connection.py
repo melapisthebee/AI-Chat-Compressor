@@ -1,24 +1,26 @@
 import threading
 from contextlib import contextmanager
 from sqlalchemy import create_engine, event
+from sqlalchemy.pool import QueuePool
 from sqlalchemy.orm import sessionmaker
 from config.settings import settings
 from database.models import Base
 
-# Format connection string for local SQLite file storage
 DATABASE_URL = f"sqlite:///{settings.DATABASE_PATH}"
 
 engine = create_engine(
     DATABASE_URL,
     connect_args={"timeout": 30},
-    pool_pre_ping=True  # Detect stale connections before use
+    poolclass=QueuePool,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=3600,
 )
 
-# Thread-local storage: one session per thread, no cross-thread sharing
 import contextvars
 _thread_local = threading.local()
 
-# Enable WAL mode for better concurrent read/write performance
 @event.listens_for(engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
@@ -40,7 +42,6 @@ def get_db_session():
     try:
         yield _thread_local.session
     finally:
-        # Only close when the thread exits, not per-call
         pass
 
 def get_thread_session():

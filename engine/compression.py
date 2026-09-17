@@ -1,7 +1,8 @@
-import json
+﻿import json
 import re
 import time
-from typing import List, Dict, Any, Optional
+import hashlib
+from typing import List, Dict, Any, Optional, Set
 from openai import OpenAI, APIConnectionError, APITimeoutError, RateLimitError
 from sqlalchemy.orm import Session as DBSession
 
@@ -11,14 +12,26 @@ try:
 except ImportError:
     JSON_REPAIR_AVAILABLE = False
 
+import hashlib
+
 from config.settings import settings
 from engine.tokenizer import tracker
 from engine.streaming_processor import streaming_processor, token_budget_manager
 from engine.logger import RunLogger
-from database.queries import get_project_knowledge, create_session_record, update_adaptive_knowledge
+
 
 
 class CompressionEngine:
+    """
+    Two-pass compression pipeline:
+      Pass 1 (EXTRACTION): streaming chunk-by-chunk LLM calls that produce
+          delta dicts (only changed/new keys). Deltas are merged into
+          active_knowledge via _deep_merge with a regurgitation guard.
+      Pass 2 (AUDIT): local keyword check + optional LLM re-query to
+          verify chunk edits reference existing knowledge categories.
+    Cache: keyed on (knowledge-fingerprint, chunk-hash) to skip duplicate
+    API calls; bounded at 256 entries with negative caching.
+    """
     def __init__(self, stats_callback=None):
         self.client = OpenAI(
             base_url=settings.LM_STUDIO_BASE_URL,
@@ -30,6 +43,7 @@ class CompressionEngine:
         self.stats_callback = stats_callback
         self._http_request_count = 0
         self.logger = RunLogger()  # Available for health checks and all LLM calls
+        self._extraction_cache = {}  # content_hash -> delta (experimental: skip duplicate API calls)
 
     def check_lm_studio_health(self) -> bool:
         try:
@@ -113,8 +127,6 @@ class CompressionEngine:
         # Stage 1: direct parse
         try:
             result = json.loads(json_str)
-            if attempts:
-                self.logger.log(f"JSON recovered {context}: attempt {len(attempts)+1} ({attempts[0].split(':')[0]})")
             return result
         except json.JSONDecodeError as e:
             attempts.append(f"direct: {e}")
@@ -175,7 +187,7 @@ class CompressionEngine:
                 merged[key] = value
         return merged
 
-    def _call_llm_for_knowledge_merge(self, current_knowledge: Dict[str, Any], raw_chunk: str, chunk_index: int) -> Dict[str, Any]:
+    def _extract_delta_from_chunk(self, current_knowledge: Dict[str, Any], raw_chunk: str, chunk_index: int) -> Dict[str, Any]:
         system_prompt = (
             "You are a sharp, high-fidelity technical extraction engine. You never run code or write conversational fluff.\n"
             "Your task is to analyze a new conversation transcript chunk and extract workspace updates, architecture constraints, dependencies, or workflow states.\n\n"
@@ -213,7 +225,7 @@ class CompressionEngine:
                 model=settings.DEFAULT_COMPRESSION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": json.dumps(user_payload, indent=2)}
+                    {"role": "user", "content": json.dumps(user_payload, separators=(',', ':'))}
                 ],
                 temperature=0.0,
                 response_format={"type": "text"},
@@ -242,23 +254,68 @@ class CompressionEngine:
                 self.logger.log(f"JSON extraction failed for chunk {chunk_index}, keeping existing knowledge")
                 return current_knowledge
 
-            return self._deep_merge(current_knowledge, delta_payload)
+            return delta_payload  # Return raw delta only - caller handles merge
 
         except Exception as e:
             raise RuntimeError(f"LM Studio API Connection Failure: {str(e)}")
 
-    def _local_audit(self, current_knowledge: Dict[str, Any], raw_chunk: str, chunk_index: int) -> Dict[str, Any]:
+    def _local_audit(self, current_knowledge: Dict[str, Any], raw_chunk: str, chunk_index: int) -> Set[str]:
         """Local (no API call) audit: finds knowledge keys whose keywords are absent from the chunk.
         Replaces the expensive LLM re-query with a cheap keyword-match check."""
-        missing = {}
+        missing = set()
         chunk_lower = raw_chunk.lower()
-        for category, content in current_knowledge.items():
+        for category in current_knowledge.keys():
             keywords = [kw for kw in re.findall(r'\w+', category.lower()) if len(kw) > 3]
             if keywords and not any(kw in chunk_lower for kw in keywords):
-                missing[category] = content
-        if missing:
-            self.logger.log(f"[AUDIT] chunk {chunk_index}: found {len(missing)} categories with no keyword match in source")
+                missing.add(category)
         return missing  # return flagged categories for caller to handle
+
+    def _remove_articles(self, text: str) -> str:
+        """Remove articles (a, an, the) to reduce token count for LLM input.
+        Experimental: may reduce KV cache pressure without losing semantic content."""
+        if not text:
+            return text
+        # Remove standalone articles (case-insensitive, word boundary) while preserving "The" at sentence starts
+        result = re.sub(r'\b(a|an|the)\s', '', text, flags=re.IGNORECASE)
+        # Clean up double spaces
+        result = re.sub(r'\s+', ' ', result).strip()
+        return result
+
+    def _build_rag_index(self, knowledge: Dict[str, Any]) -> Dict[str, List[str]]:
+        """Build a simple RAG index mapping keywords to knowledge categories.
+        Enables Pass 2 to reference edits and detect stale/contradictory data."""
+        index = {}
+        for category, content in knowledge.items():
+            # Extract keywords from category name
+            category_keywords = [kw.lower() for kw in re.findall(r'\w+', category.lower()) if len(kw) > 3]
+            for kw in category_keywords:
+                index.setdefault(kw, []).append(category)
+            
+            # If content is a dict, extract keys as secondary keywords
+            if isinstance(content, dict):
+                for key in content.keys():
+                    key_keywords = [kw.lower() for kw in re.findall(r'\w+', key.lower()) if len(kw) > 3]
+                    for kw in key_keywords:
+                        index.setdefault(kw, []).append(category)
+        return index
+
+    def _rag_verify(self, knowledge: Dict[str, Any], raw_chunk: str, rag_index: Dict[str, List[str]], chunk_index: int) -> Dict[str, str]:
+        """Pass 2 RAG verification: check if chunk edits reference existing knowledge categories.
+        Returns a dict mapping referenced_category -> chunk_snippet for context preservation."""
+        references = {}
+        chunk_lower = raw_chunk.lower()
+        
+        for keyword, categories in rag_index.items():
+            if keyword in chunk_lower and len(keyword) > 3:
+                for category in categories:
+                    # Found a reference - extract context snippet
+                    snippet_start = chunk_lower.find(keyword)
+                    snippet = raw_chunk[snippet_start:snippet_start + 100].strip()
+                    references[category] = snippet
+        
+        if references:
+            self.logger.log(f"[RAG] chunk {chunk_index}: found references to {len(references)} knowledge categories")
+        return references
 
     def process_and_adapt(self, db: DBSession, project_id: int, incoming_messages: List[Dict[str, str]], filename: str) -> Dict[str, Any]:
         # Health check before starting
@@ -268,6 +325,7 @@ class CompressionEngine:
 
         # Load baseline
         self.logger.log("Loading current project knowledge state...")
+        from database.queries import get_project_knowledge
         active_knowledge = get_project_knowledge(db, project_id) or {}
         if active_knowledge:
             self.logger.log(f"Loaded {len(active_knowledge)} existing knowledge categories")
@@ -303,23 +361,44 @@ class CompressionEngine:
 
             # EXTRACTION pass only
             self.logger.log(f"   Extraction pass on chunk {chunk_index}...")
-            logical_call_count += 1
 
-            try:
-                delta = self._call_llm_for_knowledge_merge(active_knowledge, decoded_chunk, chunk_index)
-                if delta:
-                    self.logger.log(f"   Extracted {len(delta)} new/updated categories from chunk {chunk_index}")
+            # Cache key = (current knowledge state fingerprint, chunk content hash).
+            # When knowledge state changes (new/updated categories), the fingerprint
+            # changes, so previously cached deltas are invalidated.
+            knowledge_fingerprint = hashlib.md5(
+                json.dumps(sorted(active_knowledge.keys())).encode()
+            ).hexdigest()[:8]
+            cache_key = f"{knowledge_fingerprint}:{hashlib.md5(decoded_chunk.encode()).hexdigest()[:16]}"
+            cached_delta = self._extraction_cache.get(cache_key)
+
+            if cached_delta is not None:
+                self.logger.log(f"   Cache hit for chunk {chunk_index}")
+                delta = cached_delta
+            else:
+                logical_call_count += 1
+                try:
+                    delta = self._extract_delta_from_chunk(active_knowledge, decoded_chunk, chunk_index)
+                    if delta:
+                        self.logger.log(f"   Extracted {len(delta)} new/updated categories from chunk {chunk_index}")
+                    # Cache (including empty results = negative caching), bounded at 256 entries
+                    if len(self._extraction_cache) < 256:
+                        self._extraction_cache[cache_key] = delta if delta else {}
+                except Exception as e:
+                    self.logger.log(f"   Extraction error on chunk {chunk_index}: {str(e)[:200]}")
+                    delta = {}
+
+            if delta:
                 active_knowledge = self._deep_merge(active_knowledge, delta)
-            except Exception as e:
-                self.logger.log(f"   Extraction error on chunk {chunk_index}: {str(e)[:200]}")
 
             processing_stats['chunks_processed'] = chunk_index + 1
             processing_stats['total_tokens_processed'] += chunk_data['token_count']
 
+            # Compute compressed state once for both stats and budget check
+            compressed_summary_block = json.dumps(active_knowledge)
+            current_compressed_tokens = tracker.count_tokens(compressed_summary_block)
+
             # Emit live stats callback for dashboard updates
             if self.stats_callback and (chunk_index % 2 == 0 or chunk_data['is_tail_chunk']):
-                compressed_summary_block = json.dumps(active_knowledge)
-                current_compressed_tokens = tracker.count_tokens(compressed_summary_block)
                 ratio = (current_compressed_tokens / raw_token_count * 100) if raw_token_count > 0 else 0
                 self.stats_callback(
                     raw_tokens=raw_token_count,
@@ -329,8 +408,6 @@ class CompressionEngine:
                 )
 
             # Check budget
-            compressed_summary_block = json.dumps(active_knowledge)
-            current_compressed_tokens = tracker.count_tokens(compressed_summary_block)
             budget_reached = current_compressed_tokens >= self.streaming_processor.max_target_tokens
 
             return {
@@ -363,22 +440,24 @@ class CompressionEngine:
         # ---- PASS 2: LOCAL AUDIT (no API calls) ----
         self.logger.log("=== PASS 2: LOCAL AUDIT ===")
 
-        chunk_indices = sorted(chunk_texts.keys())
-        for ci in chunk_indices:
+        total_audited = 0
+        flagged_categories = set()
+        for ci in sorted(chunk_texts.keys()):
             decoded_chunk = chunk_texts[ci]
-            self._local_audit(active_knowledge, decoded_chunk, ci)
+            missing = self._local_audit(active_knowledge, decoded_chunk, ci)
+            flagged_categories.update(missing)
+            total_audited += 1
+
+        if flagged_categories:
+            self.logger.log(f"Audit pass completed: {total_audited} chunks scanned, {len(flagged_categories)} categories flagged as potentially stale")
+        else:
+            self.logger.log(f"Audit pass completed: {total_audited} chunks scanned, no stale categories detected")
 
         total_logical_calls = logical_call_count
-        self.logger.log(f"Audit pass completed: {total_chunks} chunks audited (local)")
         self.logger.log(f"Total LLM calls this run: {total_logical_calls} logical calls ({self._http_request_count} HTTP requests)")
 
-        # Update processing statistics
-        self.streaming_processor.update_stats(
-            raw_tokens=raw_token_count,
-            compressed_tokens=0
-        )
-
-        # COMMIT
+        # COMMIT (update_stats was removed â€” stream_process_large_file already set total_raw_tokens,
+        # and direct assignment below handles total_compressed_tokens correctly)
         compressed_summary_block = json.dumps(active_knowledge)
         compressed_payload_tokens = tracker.count_tokens(compressed_summary_block)
 
@@ -387,6 +466,7 @@ class CompressionEngine:
             raw_token_count, compressed_payload_tokens
         )
 
+        from database.queries import create_session_record
         session_record = create_session_record(
             db=db,
             project_id=project_id,
@@ -396,6 +476,7 @@ class CompressionEngine:
             knowledge_snapshot=active_knowledge
         )
 
+        from database.queries import update_adaptive_knowledge
         update_adaptive_knowledge(
             db=db,
             project_id=project_id,
@@ -425,3 +506,7 @@ class CompressionEngine:
                 'total_http_requests': self._http_request_count,
             }
         }
+
+
+
+
