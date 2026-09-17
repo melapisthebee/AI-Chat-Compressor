@@ -1,9 +1,9 @@
-import os
+﻿import os
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 
-SUPPORTED_EXTENSIONS = ('.txt', '.md')
+SUPPORTED_EXTENSIONS = (".json",)
 
 class DropZone(QFrame):
     """
@@ -32,7 +32,7 @@ class DropZone(QFrame):
         """)
         
         layout = QVBoxLayout(self)
-        self.label = QLabel("Drag & Drop LM Studio Chat Export Here\n(.txt, .md)", self)
+        self.label = QLabel("Drag & Drop LM Studio Chat Export Here", self)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setStyleSheet("color: #aaaaaa; font-size: 14px; font-weight: bold;")
         layout.addWidget(self.label)
@@ -40,7 +40,7 @@ class DropZone(QFrame):
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             url = event.mimeData().urls()[0].toLocalFile()
-            if url.lower().endswith(SUPPORTED_EXTENSIONS):  # ◄ Updated here
+            if url.lower().endswith(SUPPORTED_EXTENSIONS):  # â—„ Updated here
                 self.setProperty("hover", "true")
                 self.style().unpolish(self)
                 self.style().polish(self)
@@ -62,8 +62,10 @@ class DropZone(QFrame):
         
         if event.mimeData().hasUrls():
             filepath = event.mimeData().urls()[0].toLocalFile()
-            if os.path.exists(filepath) and filepath.lower().endswith(SUPPORTED_EXTENSIONS): # ◄ Updated here
+            if os.path.exists(filepath) and filepath.lower().endswith(SUPPORTED_EXTENSIONS): # â—„ Updated here
                 self.file_dropped.emit(filepath)
                 event.acceptProposedAction()
                 return
         event.ignore()
+
+

@@ -1,7 +1,7 @@
-import sys
+﻿import sys
+sys.stdout.reconfigure(encoding="utf-8")
 from PyQt6.QtWidgets import QApplication
 from gui.main_window import MainWindow
-
 def main():
     """
     Main application entry point. Initializes the global QApplication environment
